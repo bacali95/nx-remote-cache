@@ -41,12 +41,36 @@ const (
 )
 
 func main() {
+	// The runtime image is distroless (no shell, no curl/wget) — Docker
+	// Compose's healthcheck runs this binary itself instead:
+	// ["CMD", "/server", "healthcheck"].
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(runHealthcheck())
+	}
+
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	if err := run(log); err != nil {
 		log.Error("fatal", "error", err)
 		os.Exit(1)
 	}
+}
+
+func runHealthcheck() int {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "3000"
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://localhost:" + port + "/health")
+	if err != nil {
+		return 1
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return 1
+	}
+	return 0
 }
 
 func run(log *slog.Logger) error {

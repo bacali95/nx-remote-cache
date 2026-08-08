@@ -43,7 +43,9 @@ services:
     volumes:
       - cache-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      # The runtime image is distroless — no curl/wget/shell available, so
+      # the healthcheck runs the server binary's own "healthcheck" mode.
+      test: ["CMD", "/server", "healthcheck"]
       interval: 5s
       timeout: 5s
       retries: 10
