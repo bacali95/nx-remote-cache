@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AuthProvider, useAuth } from "@/lib/auth-context"
@@ -102,6 +102,20 @@ describe("AuthProvider", () => {
 
     expect(api.post).toHaveBeenCalledWith("/auth/logout")
     expect(screen.getByTestId("user")).toHaveTextContent("none")
+  })
+
+  it("login rethrows a non-401 error from the post-login refresh instead of swallowing it", async () => {
+    vi.mocked(api.get).mockRejectedValueOnce(new ApiError(401, "not authenticated"))
+    vi.mocked(api.post).mockResolvedValue(undefined)
+    const { result } = renderHook(() => useAuth(), {
+      wrapper: ({ children }) => <AuthProvider>{children}</AuthProvider>,
+    })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    vi.mocked(api.get).mockRejectedValueOnce(new Error("database is down"))
+    await expect(result.current.login("admin@example.com", "hunter2")).rejects.toThrow(
+      "database is down"
+    )
   })
 
   it("useAuth throws when rendered outside an AuthProvider", () => {

@@ -52,7 +52,7 @@ jobs:
 
       - name: Test admin UI
         working-directory: web
-        run: bun run test
+        run: bun run test:coverage
 
       - name: Build admin UI
         working-directory: web
