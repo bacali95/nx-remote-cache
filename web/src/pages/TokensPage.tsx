@@ -177,33 +177,38 @@ export function TokensPage() {
         </TableHeader>
         <TableBody>
           {tokens.map((t) => (
-            <TableRow key={t.id}>
+            <TableRow key={t.id} className={t.revokedAt ? "opacity-50" : undefined}>
               <TableCell>{t.name}</TableCell>
-              <TableCell>
+              <TableCell className="flex items-center gap-2">
                 <Badge variant={t.scope === "write" ? "default" : "secondary"}>{t.scope}</Badge>
+                {t.revokedAt && <Badge variant="destructive">revoked</Badge>}
               </TableCell>
               <TableCell>{formatDate(t.createdAt)}</TableCell>
               <TableCell>{t.lastUsedAt ? formatDate(t.lastUsedAt) : "never"}</TableCell>
               <TableCell>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="ghost" size="sm">
-                      Revoke
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Revoke "{t.name}"?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Any CI job using this token will immediately start getting 401s.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => revoke(t.id)}>Revoke</AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                {t.revokedAt ? (
+                  <span className="text-xs text-muted-foreground">Revoked {formatDate(t.revokedAt)}</span>
+                ) : (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="ghost" size="sm">
+                        Revoke
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Revoke "{t.name}"?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Any CI job using this token will immediately start getting 401s.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => revoke(t.id)}>Revoke</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
               </TableCell>
             </TableRow>
           ))}
