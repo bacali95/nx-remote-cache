@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,15 +11,29 @@ import (
 )
 
 type fakeAuthenticator struct {
-	byHash map[string]store.Token
+	byHash  map[string]store.Token
+	failErr error // if set, Authenticate always returns this instead of looking up byHash
 }
 
 func (f *fakeAuthenticator) Authenticate(_ context.Context, tokenHash string) (store.Token, error) {
+	if f.failErr != nil {
+		return store.Token{}, f.failErr
+	}
 	tok, ok := f.byHash[tokenHash]
 	if !ok {
 		return store.Token{}, store.ErrNotFound
 	}
 	return tok, nil
+}
+
+func TestCacheTokenAuthAuthorizePropagatesUnexpectedError(t *testing.T) {
+	boom := errors.New("boom")
+	a := NewCacheTokenAuth(&fakeAuthenticator{failErr: boom})
+
+	_, _, err := a.Authorize(context.Background(), "any-token", ScopeRead)
+	if !errors.Is(err, boom) {
+		t.Fatalf("Authorize error = %v, want %v", err, boom)
+	}
 }
 
 func TestCacheTokenAuthAuthorize(t *testing.T) {
@@ -88,6 +103,13 @@ func TestGenerateToken(t *testing.T) {
 		t.Fatalf("two calls to GenerateToken produced the same token")
 	}
 }
+
+// GenerateToken's crypto/rand.Read error branch is intentionally not
+// covered: since Go 1.24, a failing system entropy source makes
+// crypto/rand call runtime.fatal (an unrecoverable process crash), not
+// return an error — see https://go.dev/issue/66821. The `if err != nil`
+// check is defensive for older/alternate runtimes but can't be exercised
+// from a test on this Go version.
 
 func TestExtractBearer(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)

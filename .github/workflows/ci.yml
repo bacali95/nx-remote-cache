@@ -68,7 +68,21 @@ jobs:
         # -p 1: several packages share the Postgres service above and
         # TRUNCATE their tables at the start of each test; running package
         # binaries in parallel races them against each other.
-        run: go test ./... -race -cover -p 1
+        run: go test ./... -race -p 1 -coverprofile=coverage.out
+
+      - name: Enforce coverage floor
+        # Go has no built-in coverage threshold (unlike vitest's
+        # coverage.thresholds for web), so check it by hand. The floor sits
+        # a few points under the number this suite actually hits — enough
+        # to fail on a real regression without being tripped by normal
+        # coverage-profile rounding.
+        run: |
+          total=$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9]+\.[0-9]+')
+          echo "Total coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { exit !(t >= 80.0) }' || {
+            echo "Coverage ${total}% is below the 80% floor"
+            exit 1
+          }
 
       - name: Lint
         uses: golangci/golangci-lint-action@v9

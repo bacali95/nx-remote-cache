@@ -41,6 +41,43 @@ func TestDynamicSwap(t *testing.T) {
 	}
 }
 
+func TestDynamicGetDeleteList(t *testing.T) {
+	ctx := context.Background()
+	backend, err := NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocal: %v", err)
+	}
+	d := NewDynamic(backend)
+
+	if err := d.Put(ctx, "hash1", bytes.NewReader([]byte("payload")), 7); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	r, size, err := d.Get(ctx, "hash1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+	if size != 7 {
+		t.Fatalf("size = %d, want 7", size)
+	}
+
+	page, err := d.List(ctx, "", 10)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(page.Entries) != 1 || page.Entries[0].Hash != "hash1" {
+		t.Fatalf("List = %+v, want one entry for hash1", page.Entries)
+	}
+
+	if err := d.Delete(ctx, "hash1"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if exists, _ := d.Exists(ctx, "hash1"); exists {
+		t.Fatalf("hash1 should be gone after Delete")
+	}
+}
+
 func TestDynamicConcurrentSwapIsRaceFree(t *testing.T) {
 	ctx := context.Background()
 	backend, err := NewLocal(t.TempDir())

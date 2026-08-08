@@ -73,3 +73,24 @@ func TestNewEncryptorRejectsBadKey(t *testing.T) {
 		t.Fatalf("expected error for key that isn't 32 bytes")
 	}
 }
+
+func TestDecryptRejectsInvalidBase64(t *testing.T) {
+	enc, err := NewEncryptor(testKey(t))
+	if err != nil {
+		t.Fatalf("NewEncryptor: %v", err)
+	}
+	if _, err := enc.Decrypt("not-base64!!!"); err == nil {
+		t.Fatal("expected error for invalid base64")
+	}
+}
+
+func TestDecryptRejectsTooShortCiphertext(t *testing.T) {
+	enc, err := NewEncryptor(testKey(t))
+	if err != nil {
+		t.Fatalf("NewEncryptor: %v", err)
+	}
+	tooShort := base64.StdEncoding.EncodeToString([]byte("short"))
+	if _, err := enc.Decrypt(tooShort); err == nil {
+		t.Fatal("expected error for ciphertext shorter than the nonce")
+	}
+}

@@ -48,3 +48,33 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+func TestConnectRejectsMalformedURL(t *testing.T) {
+	_, err := Connect(context.Background(), "not a valid connection string")
+	if err == nil {
+		t.Fatal("expected an error for a malformed connection string")
+	}
+}
+
+func TestConnectFailsPingAgainstUnreachableHost(t *testing.T) {
+	// A syntactically valid DSN pointing at a port nothing listens on:
+	// pgxpool.New succeeds (it doesn't dial eagerly), so this exercises
+	// Connect's Ping error path specifically.
+	_, err := Connect(context.Background(), "postgres://user:pass@127.0.0.1:1/db?connect_timeout=1")
+	if err == nil {
+		t.Fatal("expected a ping error for an unreachable host")
+	}
+}
+
+func TestMigrateRejectsMalformedURL(t *testing.T) {
+	if err := Migrate("not a valid connection string"); err == nil {
+		t.Fatal("expected an error for a malformed connection string")
+	}
+}
+
+func TestMigrateFailsAgainstUnreachableHost(t *testing.T) {
+	err := Migrate("postgres://user:pass@127.0.0.1:1/db?connect_timeout=1")
+	if err == nil {
+		t.Fatal("expected an error for an unreachable host")
+	}
+}

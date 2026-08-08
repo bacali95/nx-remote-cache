@@ -122,3 +122,24 @@ func TestCurrentUserEmptySession(t *testing.T) {
 		t.Fatalf("empty session: err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestLogoutWithEmptySessionIDIsANoop(t *testing.T) {
+	s := newTestStore(t)
+	m := NewManager(s, time.Hour)
+	if err := m.Logout(context.Background(), ""); err != nil {
+		t.Fatalf("Logout(\"\") = %v, want nil", err)
+	}
+}
+
+func TestVerifyPassword(t *testing.T) {
+	hash, err := HashPassword("correct-password")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	if !VerifyPassword(hash, "correct-password") {
+		t.Fatal("VerifyPassword should accept the correct password")
+	}
+	if VerifyPassword(hash, "wrong-password") {
+		t.Fatal("VerifyPassword should reject the wrong password")
+	}
+}
