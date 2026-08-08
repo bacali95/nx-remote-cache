@@ -1,12 +1,18 @@
-// Package auth implements bearer-token authentication with read/write scopes,
-// matching the Nx self-hosted remote cache contract: a token either may only
-// download artifacts (read) or may also upload them (write).
+// Package auth implements bearer-token authentication for the cache data
+// plane, backed by tokens stored in Postgres (see internal/store).
 package auth
 
 import (
-	"crypto/subtle"
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
 	"net/http"
 	"strings"
+
+	"nx-remote-cache/internal/store"
 )
 
 type Scope int
@@ -16,58 +22,63 @@ const (
 	ScopeWrite
 )
 
-// TokenStore holds the accepted bearer tokens. Every write token implicitly
-// grants read access, since a CI job that can publish results can also fetch
-// them.
-type TokenStore struct {
-	read  []string
-	write []string
+// TokenAuthenticator is the subset of *store.Store that CacheTokenAuth
+// needs; defined as an interface so tests can inject a fake instead of
+// standing up Postgres.
+type TokenAuthenticator interface {
+	Authenticate(ctx context.Context, tokenHash string) (store.Token, error)
 }
 
-func NewTokenStore(readTokens, writeTokens []string) *TokenStore {
-	return &TokenStore{read: readTokens, write: writeTokens}
+// CacheTokenAuth authorizes bearer tokens against the tokens table. A write
+// token may also read (it's a superset of read), but a read token may never
+// write.
+type CacheTokenAuth struct {
+	authn TokenAuthenticator
 }
 
-func (s *TokenStore) hasWrite(token string) bool {
-	return containsConstantTime(s.write, token)
+func NewCacheTokenAuth(authn TokenAuthenticator) *CacheTokenAuth {
+	return &CacheTokenAuth{authn: authn}
 }
 
-func (s *TokenStore) hasRead(token string) bool {
-	return containsConstantTime(s.read, token) || containsConstantTime(s.write, token)
-}
-
-// Authorize checks whether token is permitted the given scope. It returns
-// (validToken, allowed): validToken is false when the token is not
-// recognized at all (→ caller should respond 401); allowed is false when the
-// token is recognized but lacks the requested scope (→ caller should respond
-// 403).
-func (s *TokenStore) Authorize(token string, scope Scope) (validToken, allowed bool) {
-	known := s.hasRead(token) || s.hasWrite(token)
-	if !known {
-		return false, false
+// Authorize checks token against scope. validToken is false when the token
+// is unrecognized or revoked (caller should respond 401). allowed is false
+// when the token is valid but lacks the requested scope (caller should
+// respond 403).
+func (a *CacheTokenAuth) Authorize(ctx context.Context, token string, scope Scope) (validToken, allowed bool, err error) {
+	if token == "" {
+		return false, false, nil
 	}
-	switch scope {
-	case ScopeWrite:
-		return true, s.hasWrite(token)
-	default:
-		return true, s.hasRead(token)
+
+	tok, err := a.authn.Authenticate(ctx, HashToken(token))
+	if errors.Is(err, store.ErrNotFound) {
+		return false, false, nil
 	}
+	if err != nil {
+		return false, false, err
+	}
+
+	if scope == ScopeWrite {
+		return true, tok.Scope == store.ScopeWrite, nil
+	}
+	return true, true, nil
 }
 
-func containsConstantTime(tokens []string, candidate string) bool {
-	if candidate == "" {
-		return false
+// HashToken returns the SHA-256 hex digest of a bearer token. Only the hash
+// is ever stored or queried; the raw token is shown to the user once, at
+// creation time.
+func HashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// GenerateToken returns a new random bearer token, prefixed for
+// recognizability (e.g. in commit scanners), similar to GitHub PATs.
+func GenerateToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
 	}
-	found := false
-	for _, t := range tokens {
-		if len(t) != len(candidate) {
-			continue
-		}
-		if subtle.ConstantTimeCompare([]byte(t), []byte(candidate)) == 1 {
-			found = true
-		}
-	}
-	return found
+	return "nxc_" + base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // ExtractBearer pulls the token out of an "Authorization: Bearer <token>"

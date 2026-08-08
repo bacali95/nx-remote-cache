@@ -1,13 +1,33 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"nx-remote-cache/internal/store"
 )
 
-func TestAuthorize(t *testing.T) {
-	store := NewTokenStore([]string{"reader"}, []string{"writer"})
+type fakeAuthenticator struct {
+	byHash map[string]store.Token
+}
+
+func (f *fakeAuthenticator) Authenticate(_ context.Context, tokenHash string) (store.Token, error) {
+	tok, ok := f.byHash[tokenHash]
+	if !ok {
+		return store.Token{}, store.ErrNotFound
+	}
+	return tok, nil
+}
+
+func TestCacheTokenAuthAuthorize(t *testing.T) {
+	fake := &fakeAuthenticator{byHash: map[string]store.Token{
+		HashToken("reader"): {Scope: store.ScopeRead},
+		HashToken("writer"): {Scope: store.ScopeWrite},
+	}}
+	a := NewCacheTokenAuth(fake)
+	ctx := context.Background()
 
 	cases := []struct {
 		name        string
@@ -25,11 +45,47 @@ func TestAuthorize(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			valid, allowed := store.Authorize(tc.token, tc.scope)
+			valid, allowed, err := a.Authorize(ctx, tc.token, tc.scope)
+			if err != nil {
+				t.Fatalf("Authorize error: %v", err)
+			}
 			if valid != tc.wantValid || allowed != tc.wantAllowed {
 				t.Fatalf("Authorize(%q) = (%v, %v), want (%v, %v)", tc.token, valid, allowed, tc.wantValid, tc.wantAllowed)
 			}
 		})
+	}
+}
+
+func TestHashTokenDeterministicAndDistinct(t *testing.T) {
+	first := HashToken("abc")
+	second := HashToken("abc")
+	if first != second {
+		t.Fatalf("HashToken not deterministic")
+	}
+	if first == HashToken("abd") {
+		t.Fatalf("HashToken collided for distinct inputs")
+	}
+}
+
+func TestGenerateToken(t *testing.T) {
+	tok, err := GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if len(tok) < 20 {
+		t.Fatalf("token too short: %q", tok)
+	}
+	const prefix = "nxc_"
+	if tok[:len(prefix)] != prefix {
+		t.Fatalf("token missing prefix: %q", tok)
+	}
+
+	tok2, err := GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if tok == tok2 {
+		t.Fatalf("two calls to GenerateToken produced the same token")
 	}
 }
 

@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strings"
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/googleapi"
+	"google.golang.org/api/iterator"
 )
 
 // GCS stores cache artifacts in a Google Cloud Storage bucket. Like the S3
@@ -40,6 +42,13 @@ func (g *GCS) key(hash string) string {
 		return hash
 	}
 	return path.Join(g.prefix, hash)
+}
+
+func (g *GCS) unkey(name string) string {
+	if g.prefix == "" {
+		return name
+	}
+	return strings.TrimPrefix(name, g.prefix+"/")
 }
 
 func (g *GCS) Exists(ctx context.Context, hash string) (bool, error) {
@@ -83,6 +92,46 @@ func (g *GCS) Get(ctx context.Context, hash string) (io.ReadCloser, int64, error
 		return nil, 0, fmt.Errorf("read object: %w", err)
 	}
 	return r, r.Attrs.Size, nil
+}
+
+func (g *GCS) Delete(ctx context.Context, hash string) error {
+	err := g.bucket.Object(g.key(hash)).Delete(ctx)
+	if errors.Is(err, storage.ErrObjectNotExist) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("delete object: %w", err)
+	}
+	return nil
+}
+
+func (g *GCS) List(ctx context.Context, cursor string, limit int) (ListPage, error) {
+	if limit <= 0 {
+		limit = defaultListLimit
+	}
+
+	query := &storage.Query{}
+	if g.prefix != "" {
+		query.Prefix = g.prefix + "/"
+	}
+
+	it := g.bucket.Objects(ctx, query)
+	pager := iterator.NewPager(it, limit, cursor)
+	var objs []*storage.ObjectAttrs
+	nextToken, err := pager.NextPage(&objs)
+	if err != nil {
+		return ListPage{}, fmt.Errorf("list objects: %w", err)
+	}
+
+	page := ListPage{NextCursor: nextToken}
+	for _, obj := range objs {
+		page.Entries = append(page.Entries, Entry{
+			Hash:    g.unkey(obj.Name),
+			Size:    obj.Size,
+			ModTime: obj.Updated,
+		})
+	}
+	return page, nil
 }
 
 func isPreconditionFailed(err error) bool {

@@ -1,0 +1,50 @@
+package db
+
+import (
+	"context"
+	"os"
+	"testing"
+)
+
+// testDatabaseURL skips the test unless TEST_DATABASE_URL is set, since
+// these tests need a real Postgres instance (see docker-compose.yml, or run
+// one manually: docker run -e POSTGRES_PASSWORD=test -p 5432:5432 postgres).
+func testDatabaseURL(t *testing.T) string {
+	t.Helper()
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set, skipping Postgres integration test")
+	}
+	return url
+}
+
+func TestMigrateIsIdempotent(t *testing.T) {
+	url := testDatabaseURL(t)
+
+	if err := Migrate(url); err != nil {
+		t.Fatalf("first Migrate: %v", err)
+	}
+	if err := Migrate(url); err != nil {
+		t.Fatalf("second Migrate (should be a no-op): %v", err)
+	}
+
+	pool, err := Connect(context.Background(), url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer pool.Close()
+
+	for _, table := range []string{"users", "sessions", "tokens"} {
+		var exists bool
+		err := pool.QueryRow(context.Background(),
+			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = $1)`,
+			table,
+		).Scan(&exists)
+		if err != nil {
+			t.Fatalf("check table %q: %v", table, err)
+		}
+		if !exists {
+			t.Errorf("table %q was not created by migrations", table)
+		}
+	}
+}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"nx-remote-cache/internal/auth"
 	"nx-remote-cache/internal/storage"
+	"nx-remote-cache/internal/store"
 )
 
 const (
@@ -17,13 +19,33 @@ const (
 	writeToken = "write-token"
 )
 
+// fakeAuthenticator satisfies auth.TokenAuthenticator without needing
+// Postgres: tests only care about the read/write scope decision, which
+// internal/auth (tested separately) is responsible for deriving from a
+// store.Token.
+type fakeAuthenticator struct {
+	byHash map[string]store.Token
+}
+
+func (f *fakeAuthenticator) Authenticate(_ context.Context, tokenHash string) (store.Token, error) {
+	tok, ok := f.byHash[tokenHash]
+	if !ok {
+		return store.Token{}, store.ErrNotFound
+	}
+	return tok, nil
+}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
 		t.Fatalf("new local backend: %v", err)
 	}
-	tokens := auth.NewTokenStore([]string{readToken}, []string{writeToken})
+	fake := &fakeAuthenticator{byHash: map[string]store.Token{
+		auth.HashToken(readToken):  {Scope: store.ScopeRead},
+		auth.HashToken(writeToken): {Scope: store.ScopeWrite},
+	}}
+	tokens := auth.NewCacheTokenAuth(fake)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return New(backend, tokens, log, 10*1024*1024)
 }

@@ -10,17 +10,18 @@ import (
 	"strconv"
 
 	"nx-remote-cache/internal/auth"
+	"nx-remote-cache/internal/httplog"
 	"nx-remote-cache/internal/storage"
 )
 
 type Server struct {
 	backend       storage.Backend
-	tokens        *auth.TokenStore
+	tokens        *auth.CacheTokenAuth
 	log           *slog.Logger
 	maxEntryBytes int64
 }
 
-func New(backend storage.Backend, tokens *auth.TokenStore, log *slog.Logger, maxEntryBytes int64) *Server {
+func New(backend storage.Backend, tokens *auth.CacheTokenAuth, log *slog.Logger, maxEntryBytes int64) *Server {
 	return &Server{backend: backend, tokens: tokens, log: log, maxEntryBytes: maxEntryBytes}
 }
 
@@ -29,7 +30,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /v1/cache/{hash}", s.handleGet)
 	mux.HandleFunc("PUT /v1/cache/{hash}", s.handlePut)
-	return withLogging(s.log, mux)
+	return httplog.WithLogging(s.log, mux)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -47,7 +48,12 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := auth.ExtractBearer(r)
-	valid, allowed := s.tokens.Authorize(token, auth.ScopeRead)
+	valid, allowed, err := s.tokens.Authorize(r.Context(), token, auth.ScopeRead)
+	if err != nil {
+		s.log.Error("token authorize failed", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	if !valid {
 		http.Error(w, "Missing or invalid authentication token", http.StatusUnauthorized)
 		return
@@ -90,7 +96,12 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := auth.ExtractBearer(r)
-	valid, allowed := s.tokens.Authorize(token, auth.ScopeWrite)
+	valid, allowed, err := s.tokens.Authorize(r.Context(), token, auth.ScopeWrite)
+	if err != nil {
+		s.log.Error("token authorize failed", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	if !valid {
 		http.Error(w, "Missing or invalid authentication token", http.StatusUnauthorized)
 		return
@@ -109,7 +120,7 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.backend.Put(r.Context(), hash, r.Body, r.ContentLength)
+	err = s.backend.Put(r.Context(), hash, r.Body, r.ContentLength)
 	switch {
 	case err == nil:
 		w.WriteHeader(http.StatusOK)

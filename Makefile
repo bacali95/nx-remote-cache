@@ -1,13 +1,16 @@
-.PHONY: build test run docker
+.PHONY: build test run docker web
 
-build:
+web:
+	cd web && npm ci && npm run build
+
+build: web
 	go build -o bin/server ./cmd/server
 
 test:
-	go test ./... -race -cover
+	go test ./... -race -cover -p 1
 
 run: build
-	CACHE_READ_TOKENS=dev-read-token CACHE_WRITE_TOKENS=dev-write-token ./bin/server
+	./bin/server
 
 docker:
 	docker build -t nx-remote-cache:local .

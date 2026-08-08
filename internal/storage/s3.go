@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -56,6 +57,13 @@ func (s *S3) key(hash string) string {
 		return hash
 	}
 	return path.Join(s.prefix, hash)
+}
+
+func (s *S3) unkey(key string) string {
+	if s.prefix == "" {
+		return key
+	}
+	return strings.TrimPrefix(key, s.prefix+"/")
 }
 
 func (s *S3) Exists(ctx context.Context, hash string) (bool, error) {
@@ -109,6 +117,65 @@ func (s *S3) Get(ctx context.Context, hash string) (io.ReadCloser, int64, error)
 		size = *out.ContentLength
 	}
 	return out.Body, size, nil
+}
+
+func (s *S3) Delete(ctx context.Context, hash string) error {
+	exists, err := s.Exists(ctx, hash)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	_, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(s.key(hash)),
+	})
+	if err != nil {
+		return fmt.Errorf("delete object: %w", err)
+	}
+	return nil
+}
+
+func (s *S3) List(ctx context.Context, cursor string, limit int) (ListPage, error) {
+	if limit <= 0 {
+		limit = defaultListLimit
+	}
+
+	input := &s3.ListObjectsV2Input{
+		Bucket:  aws.String(s.bucket),
+		MaxKeys: aws.Int32(int32(limit)),
+	}
+	if s.prefix != "" {
+		input.Prefix = aws.String(s.prefix + "/")
+	}
+	if cursor != "" {
+		input.ContinuationToken = aws.String(cursor)
+	}
+
+	out, err := s.client.ListObjectsV2(ctx, input)
+	if err != nil {
+		return ListPage{}, fmt.Errorf("list objects: %w", err)
+	}
+
+	page := ListPage{}
+	for _, obj := range out.Contents {
+		if obj.Key == nil {
+			continue
+		}
+		entry := Entry{Hash: s.unkey(*obj.Key)}
+		if obj.Size != nil {
+			entry.Size = *obj.Size
+		}
+		if obj.LastModified != nil {
+			entry.ModTime = *obj.LastModified
+		}
+		page.Entries = append(page.Entries, entry)
+	}
+	if out.NextContinuationToken != nil {
+		page.NextCursor = *out.NextContinuationToken
+	}
+	return page, nil
 }
 
 func isNotFound(err error) bool {

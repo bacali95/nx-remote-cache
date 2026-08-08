@@ -3,9 +3,10 @@
 Self-hosted remote cache server for [Nx](https://nx.dev), implementing the
 HTTP contract from
 [nx.dev/docs/kb/self-hosted-caching](https://nx.dev/docs/kb/self-hosted-caching#build-your-own-caching-server)
-in Go.
+in Go, with an embedded admin UI (React + shadcn/ui) for browsing/pruning
+cache entries and managing users and access tokens.
 
-## API
+## Cache API (data plane)
 
 | Method | Path              | Auth              | Success | Failure                              |
 |--------|-------------------|-------------------|---------|---------------------------------------|
@@ -16,9 +17,24 @@ in Go.
 Cache entries are content-addressed and immutable: a hash is written once
 (`PUT`) and never overwritten — a second `PUT` for the same hash returns 409.
 
-## Configuration
+## Admin UI
 
-All configuration is via environment variables.
+Visit `/admin` on your running server. There's no public sign-up — the
+first login comes from the bootstrap admin (see `ADMIN_BOOTSTRAP_EMAIL` /
+`ADMIN_BOOTSTRAP_PASSWORD` below); from there, create more admin accounts
+and access tokens from the UI itself.
+
+- **Cache** — paginated list of stored entries (hash, size, last modified),
+  delete one or select many for bulk delete, or prune everything older than
+  N days.
+- **Tokens** — create/revoke bearer tokens used by CI (`read` or `write`
+  scope). The raw token is shown once at creation time and never again.
+- **Users** — create/delete admin accounts, change your own password.
+
+All cache-access tokens and admin users live in Postgres — there's no
+env-var token list anymore (see [Authentication](#authentication) below).
+
+## Storage backend configuration
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -30,8 +46,6 @@ All configuration is via environment variables.
 | `S3_USE_PATH_STYLE` | `false` | set `true` for MinIO |
 | `GCS_BUCKET` / `GCS_PREFIX` | — | gcs backend |
 | `GOOGLE_APPLICATION_CREDENTIALS` | — | path to a service-account key JSON; unset when running on GKE/GCE/Cloud Run with workload identity |
-| `CACHE_READ_TOKENS` | — | comma-separated bearer tokens, read-only |
-| `CACHE_WRITE_TOKENS` | — | comma-separated bearer tokens, read+write (required, at least one) |
 | `MAX_CACHE_ENTRY_BYTES` | `524288000` (500MB) | reject larger uploads |
 
 Use `local` for a single always-on instance with a persistent volume. Use
@@ -42,42 +56,80 @@ Credentials: a service account key file (`GOOGLE_APPLICATION_CREDENTIALS`),
 GKE/GCE workload identity, or `gcloud auth application-default login`
 locally — grant that identity `roles/storage.objectAdmin` on the bucket.
 
+The admin UI's "prune by age" and "browse" features scan every entry (most
+object stores have no server-side "modified before X" filter) — fine for a
+self-hosted cache, but expect a large `s3`/`gcs` bucket to take a while to
+prune in one call.
+
+## Admin/auth configuration
+
+| Variable | Default | Notes |
+|---|---|---|
+| `DATABASE_URL` | — | **required.** Postgres connection string, e.g. `postgres://user:pass@host:5432/nxcache?sslmode=disable` |
+| `ADMIN_BOOTSTRAP_EMAIL` / `ADMIN_BOOTSTRAP_PASSWORD` | — | creates one admin user on startup, only if the `users` table is empty. Safe to leave set indefinitely — it's a no-op once any user exists. |
+| `SESSION_TTL` | `24h` | admin login session lifetime |
+| `COOKIE_SECURE` | `true` | set `false` only for local `http://` development; must be `true` once served over TLS |
+
+Migrations run automatically on startup (embedded, tracked in a
+`schema_migrations` table — safe to run on every boot).
+
 ## Running locally
 
 ```bash
 docker compose up --build
 ```
 
-or without Docker:
+This brings up Postgres alongside the server and creates
+`admin@example.com` / `change-me-immediately` (override via
+`ADMIN_BOOTSTRAP_EMAIL`/`ADMIN_BOOTSTRAP_PASSWORD` env vars, or a `.env`
+file) — log in at `http://localhost:3000/admin` and change it immediately
+from the Users page.
+
+Without Docker, point `make run` at a Postgres instance you already have
+running:
 
 ```bash
-make run
+DATABASE_URL=postgres://... ADMIN_BOOTSTRAP_EMAIL=admin@example.com \
+  ADMIN_BOOTSTRAP_PASSWORD=changeme COOKIE_SECURE=false make run
 ```
 
-## Authentication strategy
+The frontend needs a one-time build before `go build`/`go run` will work at
+all — `go:embed` needs `web/dist` to exist (this is what `make build`/`make
+run` do for you; see the Makefile):
 
-Two token scopes exist because CI has two trust levels:
+```bash
+cd web && npm ci && npm run build
+```
 
-- **Write tokens** (`CACHE_WRITE_TOKENS`) can upload and download. Only give
-  these to jobs you trust to publish good artifacts — typically pushes to
-  `main`/protected branches, run with a token from a repository secret.
-- **Read tokens** (`CACHE_READ_TOKENS`) can only download. Give these to
-  untrusted contexts — e.g. builds triggered by pull requests from forks —
-  so a malicious fork PR can benefit from the cache but can never poison it.
-  A fork PR's workflow run does not have access to repository secrets by
-  default, so simply omitting the write secret from `pull_request` (as
-  opposed to `pull_request_target`) triggers already achieves this; the
-  read token can be safely embedded in the workflow file if desired since
-  it grants no write capability.
+## Authentication
 
-Rotate tokens by adding the new one to the CSV env var, updating repo
-secrets, then removing the old one — no downtime, since multiple tokens per
-scope are supported.
+**Cache tokens** (used by CI, in the `Authorization: Bearer` header) are
+created from the admin UI's Tokens page. Two scopes exist because CI has
+two trust levels:
+
+- **Write tokens** can upload and download. Only give these to jobs you
+  trust to publish good artifacts — typically pushes to `main`/protected
+  branches, via a token stored in a repository secret.
+- **Read tokens** can only download. Give these to untrusted contexts —
+  e.g. builds triggered by pull requests from forks — so a malicious fork
+  PR can benefit from the cache but can never poison it.
+
+Tokens are stored as a SHA-256 hash; the raw value is shown once at
+creation and can't be recovered afterward — revoke and recreate if lost.
+Revoking is immediate (next request with that token gets 401).
+
+**Admin logins** use bcrypt-hashed passwords and server-side sessions (a
+random session ID in an `httpOnly`, `SameSite=Strict` cookie; only its hash
+is stored, same pattern as cache tokens). Mutating admin API requests also
+require a custom header the browser JS sets, which a cross-site form
+submission can't forge — a second, independent layer on top of
+`SameSite=Strict`. Login attempts are rate-limited per IP.
 
 This server has no built-in TLS. Terminate TLS at a reverse proxy or load
 balancer in front of it and only expose the plaintext port on a private
-network — bearer tokens must never travel over plain HTTP on the public
-internet.
+network — bearer tokens and admin sessions must never travel over plain
+HTTP on the public internet. Set `COOKIE_SECURE=true` (the default) once
+TLS is in place.
 
 ## Nx client configuration
 
@@ -91,17 +143,32 @@ export NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=$CACHE_TOKEN
 
 ## CI/CD for this repo
 
-- `.github/workflows/ci.yml` — on every push/PR: `go vet`, `go build`,
-  `go test -race -cover`, `golangci-lint`, and a Docker build-only check.
+- `.github/workflows/ci.yml` — on every push/PR: builds the admin UI, then
+  `go vet`, `go build`, `go test -race -cover` (against a Postgres service
+  container), `golangci-lint`, and a Docker build-only check.
 - `.github/workflows/docker-publish.yml` — on push of a `vX.Y.Z` tag only:
-  builds a multi-arch (amd64/arm64) image and pushes it to
-  `ghcr.io/<owner>/<repo>`. Merges to `main` run CI but do not publish an
-  image — cut a tag (`git tag v0.1.0 && git push origin v0.1.0`) when you
-  want a new release.
+  builds a multi-arch (amd64/arm64) image (Node build stage → Go build
+  stage → distroless runtime) and pushes it to `ghcr.io/<owner>/<repo>`.
+  Merges to `main` run CI but do not publish an image — cut a tag (`git tag
+  v0.1.0 && git push origin v0.1.0`) when you want a new release.
 
-Deploy by pulling the published image and running it with your storage/auth
+Deploy by pulling the published image and running it with your storage/DB
 env vars set (e.g. as a systemd unit, a Kubernetes Deployment, or an ECS
-service) behind a TLS-terminating load balancer.
+service), pointed at a real Postgres instance, behind a TLS-terminating
+load balancer.
+
+Running the Go test suite locally needs a real Postgres (several packages
+run integration tests against it, skipped automatically if unset):
+
+```bash
+docker run --rm -e POSTGRES_PASSWORD=test -p 5432:5432 postgres:16-alpine &
+TEST_DATABASE_URL="postgres://postgres:test@localhost:5432/postgres?sslmode=disable" \
+  go test ./... -race -cover -p 1
+```
+
+`-p 1` matters: several packages share that one Postgres instance and
+truncate its tables at the start of each test, which races if package
+binaries run in parallel.
 
 ## Example: consumer repo workflow
 
@@ -128,6 +195,6 @@ jobs:
       - run: npx nx affected -t build test lint
 ```
 
-Store `NX_CACHE_READ_TOKEN` and `NX_CACHE_WRITE_TOKEN` as repository (or
-organization) secrets in the consumer repo, matching values in this
-server's `CACHE_READ_TOKENS` / `CACHE_WRITE_TOKENS`.
+Create `NX_CACHE_READ_TOKEN` and `NX_CACHE_WRITE_TOKEN` from this server's
+admin UI (Tokens page), then store the raw values as repository (or
+organization) secrets in the consumer repo.

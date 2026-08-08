@@ -1,8 +1,18 @@
+FROM node:22-alpine AS web-build
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
 FROM golang:1.25-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+# go:embed requires web/dist to exist before `go build` — it's a build
+# artifact (gitignored), produced by the web-build stage above.
+COPY --from=web-build /src/web/dist ./web/dist
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
 RUN mkdir -p /out/data
 

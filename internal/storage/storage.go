@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"regexp"
+	"time"
 )
 
 // ErrNotFound is returned by Get/Stat when the hash has no stored artifact.
@@ -30,6 +31,27 @@ type Backend interface {
 	// its size. Callers must close the reader. Returns ErrNotFound if
 	// absent.
 	Get(ctx context.Context, hash string) (io.ReadCloser, int64, error)
+
+	// Delete removes the artifact stored under hash. Returns ErrNotFound
+	// if absent.
+	Delete(ctx context.Context, hash string) error
+
+	// List returns up to limit entries starting after cursor (empty cursor
+	// starts from the beginning). NextCursor in the returned page is empty
+	// once there are no more entries.
+	List(ctx context.Context, cursor string, limit int) (ListPage, error)
+}
+
+// Entry describes one stored cache artifact, as surfaced by List.
+type Entry struct {
+	Hash    string
+	Size    int64
+	ModTime time.Time
+}
+
+type ListPage struct {
+	Entries    []Entry
+	NextCursor string
 }
 
 // validHash matches the hash format Nx sends in the URL path: an

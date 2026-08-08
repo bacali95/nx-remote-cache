@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -36,9 +35,18 @@ type Config struct {
 	GCSBucket string
 	GCSPrefix string
 
-	// auth
-	ReadTokens  []string
-	WriteTokens []string
+	// admin database: users, sessions, and cache access tokens all live in
+	// Postgres (see internal/store) rather than static env-var tokens.
+	DatabaseURL string
+
+	// admin sessions
+	SessionTTL   time.Duration
+	CookieSecure bool // set false only for local http:// development
+
+	// bootstrap: if the users table is empty on startup and both of these
+	// are set, a first admin account is created so there's a way to log in.
+	AdminBootstrapEmail    string
+	AdminBootstrapPassword string
 
 	MaxEntryBytes int64
 
@@ -49,26 +57,29 @@ type Config struct {
 
 func FromEnv() (*Config, error) {
 	cfg := &Config{
-		Addr:           getEnv("PORT_ADDR", ":"+getEnv("PORT", "3000")),
-		Storage:        StorageBackend(getEnv("STORAGE_BACKEND", "local")),
-		LocalDir:       getEnv("CACHE_DIR", "/var/lib/nx-remote-cache"),
-		S3Bucket:       os.Getenv("S3_BUCKET"),
-		S3Region:       os.Getenv("S3_REGION"),
-		S3Prefix:       os.Getenv("S3_PREFIX"),
-		S3Endpoint:     os.Getenv("S3_ENDPOINT"),
-		S3UsePathStyle: getEnvBool("S3_USE_PATH_STYLE", false),
-		GCSBucket:      os.Getenv("GCS_BUCKET"),
-		GCSPrefix:      os.Getenv("GCS_PREFIX"),
-		ReadTokens:     splitCSV(os.Getenv("CACHE_READ_TOKENS")),
-		WriteTokens:    splitCSV(os.Getenv("CACHE_WRITE_TOKENS")),
-		MaxEntryBytes:  getEnvInt64("MAX_CACHE_ENTRY_BYTES", 500*1024*1024), // 500MB default
-		ReadTimeout:    getEnvDuration("READ_TIMEOUT", 30*time.Second),
-		WriteTimeout:   getEnvDuration("WRITE_TIMEOUT", 60*time.Second),
-		ShutdownGrace:  getEnvDuration("SHUTDOWN_GRACE", 15*time.Second),
+		Addr:                   getEnv("PORT_ADDR", ":"+getEnv("PORT", "3000")),
+		Storage:                StorageBackend(getEnv("STORAGE_BACKEND", "local")),
+		LocalDir:               getEnv("CACHE_DIR", "/var/lib/nx-remote-cache"),
+		S3Bucket:               os.Getenv("S3_BUCKET"),
+		S3Region:               os.Getenv("S3_REGION"),
+		S3Prefix:               os.Getenv("S3_PREFIX"),
+		S3Endpoint:             os.Getenv("S3_ENDPOINT"),
+		S3UsePathStyle:         getEnvBool("S3_USE_PATH_STYLE", false),
+		GCSBucket:              os.Getenv("GCS_BUCKET"),
+		GCSPrefix:              os.Getenv("GCS_PREFIX"),
+		DatabaseURL:            os.Getenv("DATABASE_URL"),
+		SessionTTL:             getEnvDuration("SESSION_TTL", 24*time.Hour),
+		CookieSecure:           getEnvBool("COOKIE_SECURE", true),
+		AdminBootstrapEmail:    os.Getenv("ADMIN_BOOTSTRAP_EMAIL"),
+		AdminBootstrapPassword: os.Getenv("ADMIN_BOOTSTRAP_PASSWORD"),
+		MaxEntryBytes:          getEnvInt64("MAX_CACHE_ENTRY_BYTES", 500*1024*1024), // 500MB default
+		ReadTimeout:            getEnvDuration("READ_TIMEOUT", 30*time.Second),
+		WriteTimeout:           getEnvDuration("WRITE_TIMEOUT", 60*time.Second),
+		ShutdownGrace:          getEnvDuration("SHUTDOWN_GRACE", 15*time.Second),
 	}
 
-	if len(cfg.WriteTokens) == 0 {
-		return nil, fmt.Errorf("CACHE_WRITE_TOKENS must contain at least one token")
+	if cfg.DatabaseURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL is required (users, sessions, and cache tokens are stored in Postgres)")
 	}
 
 	switch cfg.Storage {
@@ -130,19 +141,4 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
-}
-
-func splitCSV(v string) []string {
-	if v == "" {
-		return nil
-	}
-	parts := strings.Split(v, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }

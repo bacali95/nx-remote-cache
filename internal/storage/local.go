@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 )
 
 // Local stores cache artifacts as files on disk. Suited for a single
@@ -22,12 +24,14 @@ func NewLocal(dir string) (*Local, error) {
 	return &Local{dir: dir}, nil
 }
 
-func (l *Local) path(hash string) string {
+// Path returns the on-disk file path for hash. Exported for operational
+// tooling (and tests) that need to touch the underlying file directly.
+func (l *Local) Path(hash string) string {
 	return filepath.Join(l.dir, hash)
 }
 
 func (l *Local) Exists(_ context.Context, hash string) (bool, error) {
-	_, err := os.Stat(l.path(hash))
+	_, err := os.Stat(l.Path(hash))
 	if os.IsNotExist(err) {
 		return false, nil
 	}
@@ -38,7 +42,7 @@ func (l *Local) Exists(_ context.Context, hash string) (bool, error) {
 }
 
 func (l *Local) Put(_ context.Context, hash string, r io.Reader, size int64) error {
-	dest := l.path(hash)
+	dest := l.Path(hash)
 	if _, err := os.Stat(dest); err == nil {
 		return ErrAlreadyExists
 	} else if !os.IsNotExist(err) {
@@ -76,7 +80,7 @@ func (l *Local) Put(_ context.Context, hash string, r io.Reader, size int64) err
 }
 
 func (l *Local) Get(_ context.Context, hash string) (io.ReadCloser, int64, error) {
-	f, err := os.Open(l.path(hash))
+	f, err := os.Open(l.Path(hash))
 	if os.IsNotExist(err) {
 		return nil, 0, ErrNotFound
 	}
@@ -89,4 +93,54 @@ func (l *Local) Get(_ context.Context, hash string) (io.ReadCloser, int64, error
 		return nil, 0, err
 	}
 	return f, info.Size(), nil
+}
+
+func (l *Local) Delete(_ context.Context, hash string) error {
+	err := os.Remove(l.Path(hash))
+	if os.IsNotExist(err) {
+		return ErrNotFound
+	}
+	return err
+}
+
+const defaultListLimit = 50
+
+func (l *Local) List(_ context.Context, cursor string, limit int) (ListPage, error) {
+	if limit <= 0 {
+		limit = defaultListLimit
+	}
+
+	dirEntries, err := os.ReadDir(l.dir)
+	if err != nil {
+		return ListPage{}, err
+	}
+
+	// os.ReadDir guarantees results sorted by filename, so a simple
+	// greater-than scan gives us cursor-based pagination for free.
+	var names []string
+	for _, e := range dirEntries {
+		if e.IsDir() || strings.Contains(e.Name(), ".tmp-") {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+
+	start := sort.Search(len(names), func(i int) bool { return names[i] > cursor })
+	end := start + limit
+	if end > len(names) {
+		end = len(names)
+	}
+
+	page := ListPage{}
+	for _, name := range names[start:end] {
+		info, err := os.Stat(filepath.Join(l.dir, name))
+		if err != nil {
+			continue // removed between ReadDir and Stat; skip rather than fail the whole page
+		}
+		page.Entries = append(page.Entries, Entry{Hash: name, Size: info.Size(), ModTime: info.ModTime()})
+	}
+	if end < len(names) {
+		page.NextCursor = names[end-1]
+	}
+	return page, nil
 }

@@ -1,17 +1,43 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nxcache
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nxcache-dev-password}
+      POSTGRES_DB: nxcache
+    ports:
+      - 5433:5432
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nxcache"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   nx-remote-cache:
     build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "3000:3000"
     environment:
       PORT: "3000"
       STORAGE_BACKEND: local
       CACHE_DIR: /data
-      # Generate with: openssl rand -hex 32
-      CACHE_READ_TOKENS: ${CACHE_READ_TOKENS:-dev-read-token}
-      CACHE_WRITE_TOKENS: ${CACHE_WRITE_TOKENS:-dev-write-token}
+      DATABASE_URL: postgres://nxcache:${POSTGRES_PASSWORD:-nxcache-dev-password}@postgres:5433/nxcache?sslmode=disable
+      # First-run only: creates one admin user if the users table is empty.
+      # Log in and create real accounts/tokens from the UI, then you can
+      # drop these two.
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@example.com}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-change-me-immediately}
+      # Plain http:// locally; set true (the default in production) once
+      # this sits behind TLS.
+      COOKIE_SECURE: "false"
     volumes:
       - cache-data:/data
 
 volumes:
   cache-data:
+  pg-data:
