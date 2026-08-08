@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom"
 import { useAuth } from "@/lib/auth-context"
 import { Button } from "@/components/ui/button"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { cn } from "@/lib/utils"
 
 const navItems = [
@@ -44,6 +45,7 @@ export function Layout() {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm text-muted-foreground">{user?.email}</span>
+            <ThemeToggle />
             <Button variant="outline" size="sm" onClick={handleLogout}>
               Log out
             </Button>
