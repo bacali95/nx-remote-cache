@@ -1,0 +1,17 @@
+services:
+  nx-remote-cache:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      STORAGE_BACKEND: local
+      CACHE_DIR: /data
+      # Generate with: openssl rand -hex 32
+      CACHE_READ_TOKENS: ${CACHE_READ_TOKENS:-dev-read-token}
+      CACHE_WRITE_TOKENS: ${CACHE_WRITE_TOKENS:-dev-write-token}
+    volumes:
+      - cache-data:/data
+
+volumes:
+  cache-data:
