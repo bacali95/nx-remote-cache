@@ -69,21 +69,20 @@ func (s *Server) handleListCache(w http.ResponseWriter, r *http.Request, _ store
 		out.Entries = append(out.Entries, entry)
 	}
 
-	// Most-recently-touched first: entries that have been read sort by
-	// their last read time, entries that have never been read fall back
-	// to their last modified time.
+	// Entries that have been read come first, most recently read first;
+	// everything else (never read) follows, most recently modified first.
 	sort.Slice(out.Entries, func(i, j int) bool {
-		return sortKey(out.Entries[i]).After(sortKey(out.Entries[j]))
+		a, b := out.Entries[i], out.Entries[j]
+		if (a.LastReadAt != nil) != (b.LastReadAt != nil) {
+			return a.LastReadAt != nil
+		}
+		if a.LastReadAt != nil {
+			return a.LastReadAt.After(*b.LastReadAt)
+		}
+		return a.ModTime.After(b.ModTime)
 	})
 
 	writeJSON(w, http.StatusOK, out)
-}
-
-func sortKey(e cacheEntryResponse) time.Time {
-	if e.LastReadAt != nil {
-		return *e.LastReadAt
-	}
-	return e.ModTime
 }
 
 func (s *Server) handleDeleteCacheEntry(w http.ResponseWriter, r *http.Request, _ store.User) {
