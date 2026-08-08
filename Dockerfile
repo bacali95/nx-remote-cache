@@ -1,9 +1,9 @@
-FROM node:22-alpine AS web-build
+FROM oven/bun:1.3.14-alpine AS web-build
 WORKDIR /src/web
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
+COPY web/package.json web/bun.lock ./
+RUN bun install --frozen-lockfile
 COPY web/ ./
-RUN npm run build
+RUN bun run build
 
 FROM golang:1.25-alpine AS build
 WORKDIR /src

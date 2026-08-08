@@ -115,7 +115,7 @@ all — `go:embed` needs `web/dist` to exist (this is what `make build`/`make
 run` do for you; see the Makefile):
 
 ```bash
-cd web && npm ci && npm run build
+cd web && bun install --frozen-lockfile && bun run build
 ```
 
 ## Authentication

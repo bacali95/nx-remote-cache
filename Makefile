@@ -1,7 +1,7 @@
 .PHONY: build test run docker web
 
 web:
-	cd web && npm ci && npm run build
+	cd web && bun install --frozen-lockfile && bun run build
 
 build: web
 	go build -o bin/server ./cmd/server

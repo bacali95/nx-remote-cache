@@ -1,8 +1,8 @@
 // Package webui embeds the built admin UI so the Go binary can serve it
-// directly (single container, single process). Run `npm ci && npm run
-// build` in this directory before `go build`/`go vet`/`go test` on the
-// main module — see the root Makefile's `build` target, which does this
-// for you.
+// directly (single container, single process). Run `bun install
+// --frozen-lockfile && bun run build` in this directory before
+// `go build`/`go vet`/`go test` on the main module — see the root
+// Makefile's `build` target, which does this for you.
 package webui
 
 import (
