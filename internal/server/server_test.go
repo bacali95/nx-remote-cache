@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"nx-remote-cache/internal/auth"
 	"nx-remote-cache/internal/storage"
@@ -35,7 +37,34 @@ func (f *fakeAuthenticator) Authenticate(_ context.Context, tokenHash string) (s
 	return tok, nil
 }
 
+// fakeReadTracker satisfies server.ReadTracker without Postgres. notify
+// lets a test block until an async RecordCacheRead call actually lands,
+// since handleGet fires it in a goroutine.
+type fakeReadTracker struct {
+	mu     sync.Mutex
+	calls  []string
+	notify chan string
+}
+
+func newFakeReadTracker() *fakeReadTracker {
+	return &fakeReadTracker{notify: make(chan string, 16)}
+}
+
+func (f *fakeReadTracker) RecordCacheRead(_ context.Context, hash string) error {
+	f.mu.Lock()
+	f.calls = append(f.calls, hash)
+	f.mu.Unlock()
+	f.notify <- hash
+	return nil
+}
+
 func newTestServer(t *testing.T) *Server {
+	t.Helper()
+	srv, _ := newTestServerWithReads(t)
+	return srv
+}
+
+func newTestServerWithReads(t *testing.T) (*Server, *fakeReadTracker) {
 	t.Helper()
 	backend, err := storage.NewLocal(t.TempDir())
 	if err != nil {
@@ -46,8 +75,9 @@ func newTestServer(t *testing.T) *Server {
 		auth.HashToken(writeToken): {Scope: store.ScopeWrite},
 	}}
 	tokens := auth.NewCacheTokenAuth(fake)
+	reads := newFakeReadTracker()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(backend, tokens, log, 10*1024*1024)
+	return New(backend, tokens, reads, log, 10*1024*1024), reads
 }
 
 func doRequest(t *testing.T, h http.Handler, method, path, token string, body []byte) *httptest.ResponseRecorder {
@@ -82,6 +112,40 @@ func TestPutThenGetRoundtrip(t *testing.T) {
 	}
 	if getResp.Body.String() != string(payload) {
 		t.Fatalf("GET body = %q, want %q", getResp.Body.String(), payload)
+	}
+}
+
+func TestGetHitRecordsReadButMissDoesNot(t *testing.T) {
+	srv, reads := newTestServerWithReads(t)
+	h := srv.Handler()
+
+	putResp := doRequest(t, h, http.MethodPut, "/v1/cache/abc123", writeToken, []byte("payload"))
+	if putResp.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, want 200", putResp.Code)
+	}
+
+	getResp := doRequest(t, h, http.MethodGet, "/v1/cache/abc123", readToken, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200", getResp.Code)
+	}
+	select {
+	case hash := <-reads.notify:
+		if hash != "abc123" {
+			t.Fatalf("recorded read for %q, want abc123", hash)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RecordCacheRead was not called within 2s of a cache hit")
+	}
+
+	missResp := doRequest(t, h, http.MethodGet, "/v1/cache/doesnotexist", readToken, nil)
+	if missResp.Code != http.StatusNotFound {
+		t.Fatalf("GET miss status = %d, want 404", missResp.Code)
+	}
+	select {
+	case hash := <-reads.notify:
+		t.Fatalf("RecordCacheRead should not be called on a miss, got call for %q", hash)
+	case <-time.After(200 * time.Millisecond):
+		// expected: no call
 	}
 }
 

@@ -67,6 +67,8 @@ export interface CacheEntry {
   hash: string
   size: number
   modTime: string
+  readCount: number
+  lastReadAt?: string
 }
 
 export interface ListCacheResponse {

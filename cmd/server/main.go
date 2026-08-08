@@ -21,12 +21,23 @@ import (
 	"nx-remote-cache/internal/auth"
 	"nx-remote-cache/internal/config"
 	"nx-remote-cache/internal/db"
+	"nx-remote-cache/internal/janitor"
 	"nx-remote-cache/internal/server"
 	"nx-remote-cache/internal/session"
 	"nx-remote-cache/internal/settings"
 	"nx-remote-cache/internal/storage"
 	"nx-remote-cache/internal/store"
 	webui "nx-remote-cache/web"
+)
+
+// Background cleanup thresholds (see internal/janitor for the exact
+// semantics, in particular why unreadAfter needs an age gate). Not yet
+// exposed as admin-configurable settings — worth adding to the Settings
+// page if these ever need tuning per deployment.
+const (
+	janitorMaxAge      = 30 * 24 * time.Hour
+	janitorUnreadAfter = 14 * 24 * time.Hour
+	janitorInterval    = 6 * time.Hour
 )
 
 func main() {
@@ -79,7 +90,7 @@ func run(log *slog.Logger) error {
 	// accepting requests.
 	dynBackend := storage.NewDynamic(nil)
 	sessions := session.NewManager(st, 0)
-	dataSrv := server.New(dynBackend, auth.NewCacheTokenAuth(st), log, 0)
+	dataSrv := server.New(dynBackend, auth.NewCacheTokenAuth(st), st, log, 0)
 	settingsMgr := settings.NewManager(st, enc, dynBackend, sessions, dataSrv)
 	if err := settingsMgr.Load(ctx); err != nil {
 		return fmt.Errorf("load settings: %w", err)
@@ -87,7 +98,17 @@ func run(log *slog.Logger) error {
 
 	adminSrv := adminapi.New(st, sessions, dynBackend, settingsMgr, log, cfg.CookieSecure, uiFS)
 
+	j := janitor.New(dynBackend, st, log, janitor.Config{
+		MaxAge:      janitorMaxAge,
+		UnreadAfter: janitorUnreadAfter,
+		Interval:    janitorInterval,
+	})
+	go j.Run(ctx)
+
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/admin/", http.StatusFound)
+	})
 	mux.Handle("/v1/", dataSrv.Handler())
 	mux.Handle("/health", dataSrv.Handler())
 	mux.Handle("/admin/", adminSrv.Handler())

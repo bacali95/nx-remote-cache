@@ -3,27 +3,37 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"nx-remote-cache/internal/auth"
 	"nx-remote-cache/internal/httplog"
 	"nx-remote-cache/internal/storage"
 )
 
+// ReadTracker records cache hits (count + timestamp) for the admin UI and
+// the background janitor's "unread" prune rule. Recording is best-effort
+// and off the request's critical path — see handleGet.
+type ReadTracker interface {
+	RecordCacheRead(ctx context.Context, hash string) error
+}
+
 type Server struct {
 	backend       storage.Backend
 	tokens        *auth.CacheTokenAuth
+	reads         ReadTracker
 	log           *slog.Logger
 	maxEntryBytes atomic.Int64
 }
 
-func New(backend storage.Backend, tokens *auth.CacheTokenAuth, log *slog.Logger, maxEntryBytes int64) *Server {
-	s := &Server{backend: backend, tokens: tokens, log: log}
+func New(backend storage.Backend, tokens *auth.CacheTokenAuth, reads ReadTracker, log *slog.Logger, maxEntryBytes int64) *Server {
+	s := &Server{backend: backend, tokens: tokens, reads: reads, log: log}
 	s.SetMaxEntryBytes(maxEntryBytes)
 	return s
 }
@@ -84,6 +94,18 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = body.Close() }()
+
+	// Best-effort and off the critical path: a slow or failing tracking
+	// write must never slow down or fail a cache download. Uses its own
+	// context rather than the request's, since the request's is cancelled
+	// the moment this handler returns — likely before this goroutine runs.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.reads.RecordCacheRead(ctx, hash); err != nil {
+			s.log.Warn("record cache read failed", "hash", hash, "error", err)
+		}
+	}()
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	if size > 0 {

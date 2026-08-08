@@ -18,9 +18,11 @@ const (
 )
 
 type cacheEntryResponse struct {
-	Hash    string    `json:"hash"`
-	Size    int64     `json:"size"`
-	ModTime time.Time `json:"modTime"`
+	Hash       string     `json:"hash"`
+	Size       int64      `json:"size"`
+	ModTime    time.Time  `json:"modTime"`
+	ReadCount  int64      `json:"readCount"`
+	LastReadAt *time.Time `json:"lastReadAt,omitempty"`
 }
 
 type listCacheResponse struct {
@@ -44,9 +46,26 @@ func (s *Server) handleListCache(w http.ResponseWriter, r *http.Request, _ store
 		return
 	}
 
+	hashes := make([]string, len(page.Entries))
+	for i, e := range page.Entries {
+		hashes[i] = e.Hash
+	}
+	readStats, err := s.store.GetCacheReadStatsBatch(r.Context(), hashes)
+	if err != nil {
+		// Read stats are supplementary — don't fail the whole listing over
+		// them, just show zero reads for this page.
+		s.log.Warn("load cache read stats failed", "error", err)
+		readStats = map[string]store.CacheReadStats{}
+	}
+
 	out := listCacheResponse{NextCursor: page.NextCursor}
 	for _, e := range page.Entries {
-		out.Entries = append(out.Entries, cacheEntryResponse{Hash: e.Hash, Size: e.Size, ModTime: e.ModTime})
+		entry := cacheEntryResponse{Hash: e.Hash, Size: e.Size, ModTime: e.ModTime}
+		if stats, ok := readStats[e.Hash]; ok {
+			entry.ReadCount = stats.ReadCount
+			entry.LastReadAt = stats.LastReadAt
+		}
+		out.Entries = append(out.Entries, entry)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -68,7 +87,17 @@ func (s *Server) handleDeleteCacheEntry(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	s.clearReadStats(r.Context(), hash)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// clearReadStats removes a deleted entry's read-tracking row, best-effort —
+// a failure here must never block or fail the delete that already
+// succeeded against the storage backend.
+func (s *Server) clearReadStats(ctx context.Context, hash string) {
+	if err := s.store.DeleteCacheReadStats(ctx, hash); err != nil {
+		s.log.Warn("clear cache read stats failed", "hash", hash, "error", err)
+	}
 }
 
 type bulkDeleteRequest struct {
@@ -97,6 +126,7 @@ func (s *Server) handleBulkDelete(w http.ResponseWriter, r *http.Request, _ stor
 		}
 		err := s.backend.Delete(r.Context(), h)
 		if err == nil {
+			s.clearReadStats(r.Context(), h)
 			deleted++
 		} else if !errors.Is(err, storage.ErrNotFound) {
 			s.log.Warn("bulk delete: failed to delete entry", "hash", h, "error", err)
@@ -147,6 +177,7 @@ func (s *Server) pruneOlderThan(ctx context.Context, cutoff time.Time) (int, err
 				if err := s.backend.Delete(ctx, e.Hash); err != nil && !errors.Is(err, storage.ErrNotFound) {
 					return deleted, err
 				}
+				s.clearReadStats(ctx, e.Hash)
 				deleted++
 			}
 		}

@@ -50,7 +50,7 @@ func testServer(t *testing.T) (http.Handler, *store.Store, storage.Backend) {
 		t.Fatalf("pgxpool.New: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(context.Background(), `TRUNCATE users, sessions, tokens RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := pool.Exec(context.Background(), `TRUNCATE users, sessions, tokens, cache_reads RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	if _, err := pool.Exec(context.Background(), `INSERT INTO app_settings (id) VALUES (true)`); err != nil {
@@ -385,6 +385,63 @@ func TestSettingsGetAndUpdateOverHTTP(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &stillLocal)
 	if stillLocal.StorageBackend != "local" || stillLocal.LocalDir != newDir {
 		t.Fatalf("settings changed after a rejected update: %+v", stillLocal)
+	}
+}
+
+func TestCacheListShowsReadStatsAndDeleteClearsThem(t *testing.T) {
+	h, st, backend := testServer(t)
+	seedUser(t, st, "admin@example.com", "correct-password")
+	cookie := loginAndGetCookie(t, h, "admin@example.com", "correct-password")
+	ctx := context.Background()
+
+	if err := backend.Put(ctx, "readtracked", bytes.NewReader([]byte("x")), 1); err != nil {
+		t.Fatalf("seed readtracked: %v", err)
+	}
+	if err := backend.Put(ctx, "neverread", bytes.NewReader([]byte("y")), 1); err != nil {
+		t.Fatalf("seed neverread: %v", err)
+	}
+	if err := st.RecordCacheRead(ctx, "readtracked"); err != nil {
+		t.Fatalf("RecordCacheRead: %v", err)
+	}
+	if err := st.RecordCacheRead(ctx, "readtracked"); err != nil {
+		t.Fatalf("RecordCacheRead (2nd): %v", err)
+	}
+
+	w := doJSON(t, h, http.MethodGet, "/admin/api/cache", nil, cookie, false)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list cache: status = %d, body = %s", w.Code, w.Body)
+	}
+	var page listCacheResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	byHash := map[string]cacheEntryResponse{}
+	for _, e := range page.Entries {
+		byHash[e.Hash] = e
+	}
+	if got := byHash["readtracked"].ReadCount; got != 2 {
+		t.Fatalf("readtracked ReadCount = %d, want 2", got)
+	}
+	if byHash["readtracked"].LastReadAt == nil {
+		t.Fatalf("readtracked LastReadAt is nil, want set")
+	}
+	if got := byHash["neverread"].ReadCount; got != 0 {
+		t.Fatalf("neverread ReadCount = %d, want 0", got)
+	}
+	if byHash["neverread"].LastReadAt != nil {
+		t.Fatalf("neverread LastReadAt = %v, want nil", byHash["neverread"].LastReadAt)
+	}
+
+	w = doJSON(t, h, http.MethodDelete, "/admin/api/cache/readtracked", nil, cookie, true)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete readtracked: status = %d, body = %s", w.Code, w.Body)
+	}
+	stats, err := st.GetCacheReadStatsBatch(ctx, []string{"readtracked"})
+	if err != nil {
+		t.Fatalf("GetCacheReadStatsBatch: %v", err)
+	}
+	if _, ok := stats["readtracked"]; ok {
+		t.Fatalf("read stats for readtracked should be cleared after delete")
 	}
 }
 

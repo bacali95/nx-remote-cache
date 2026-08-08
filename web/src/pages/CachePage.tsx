@@ -193,6 +193,8 @@ export function CachePage() {
             <TableHead>Hash</TableHead>
             <TableHead>Size</TableHead>
             <TableHead>Last modified</TableHead>
+            <TableHead>Reads</TableHead>
+            <TableHead>Last read</TableHead>
             <TableHead className="w-16" />
           </TableRow>
         </TableHeader>
@@ -209,6 +211,8 @@ export function CachePage() {
               <TableCell className="font-mono text-sm">{entry.hash}</TableCell>
               <TableCell>{formatBytes(entry.size)}</TableCell>
               <TableCell>{formatDate(entry.modTime)}</TableCell>
+              <TableCell>{entry.readCount}</TableCell>
+              <TableCell>{entry.lastReadAt ? formatDate(entry.lastReadAt) : "never"}</TableCell>
               <TableCell>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
@@ -234,7 +238,7 @@ export function CachePage() {
           ))}
           {!loading && entries.length === 0 && (
             <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
+              <TableCell colSpan={7} className="text-center text-muted-foreground">
                 No cache entries.
               </TableCell>
             </TableRow>
