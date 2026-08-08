@@ -26,7 +26,7 @@ services:
       PORT: "3000"
       STORAGE_BACKEND: local
       CACHE_DIR: /data
-      DATABASE_URL: postgres://nxcache:${POSTGRES_PASSWORD:-nxcache-dev-password}@postgres:5433/nxcache?sslmode=disable
+      DATABASE_URL: postgres://nxcache:${POSTGRES_PASSWORD:-nxcache-dev-password}@postgres:5432/nxcache?sslmode=disable
       # First-run only: creates one admin user if the users table is empty.
       # Log in and create real accounts/tokens from the UI, then you can
       # drop these two.
