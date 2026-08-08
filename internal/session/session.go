@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"nx-remote-cache/internal/store"
@@ -20,12 +21,26 @@ import (
 var ErrInvalidCredentials = errors.New("session: invalid email or password")
 
 type Manager struct {
-	store *store.Store
-	ttl   time.Duration
+	store    *store.Store
+	ttlNanos atomic.Int64
 }
 
 func NewManager(s *store.Store, ttl time.Duration) *Manager {
-	return &Manager{store: s, ttl: ttl}
+	m := &Manager{store: s}
+	m.SetTTL(ttl)
+	return m
+}
+
+// SetTTL updates the session lifetime used for sessions created from now
+// on (existing sessions keep whatever expires_at they were given). Safe to
+// call concurrently with Login — see internal/settings, which calls this
+// when an admin changes the setting from the UI.
+func (m *Manager) SetTTL(ttl time.Duration) {
+	m.ttlNanos.Store(int64(ttl))
+}
+
+func (m *Manager) TTL() time.Duration {
+	return time.Duration(m.ttlNanos.Load())
 }
 
 // Login verifies credentials and creates a new session, returning the raw
@@ -49,7 +64,7 @@ func (m *Manager) Login(ctx context.Context, email, password string) (string, er
 	if err != nil {
 		return "", err
 	}
-	if err := m.store.CreateSession(ctx, hashID(raw), u.ID, time.Now().Add(m.ttl)); err != nil {
+	if err := m.store.CreateSession(ctx, hashID(raw), u.ID, time.Now().Add(m.TTL())); err != nil {
 		return "", err
 	}
 	return raw, nil

@@ -19,7 +19,7 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, rawSessionID string) {
 		HttpOnly: true,
 		Secure:   s.cookieSecure,
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int(s.sessionTTL.Seconds()),
+		MaxAge:   int(s.sessions.TTL().Seconds()),
 	})
 }
 

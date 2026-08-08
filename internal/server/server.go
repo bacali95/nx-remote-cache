@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 
 	"nx-remote-cache/internal/auth"
 	"nx-remote-cache/internal/httplog"
@@ -18,11 +19,20 @@ type Server struct {
 	backend       storage.Backend
 	tokens        *auth.CacheTokenAuth
 	log           *slog.Logger
-	maxEntryBytes int64
+	maxEntryBytes atomic.Int64
 }
 
 func New(backend storage.Backend, tokens *auth.CacheTokenAuth, log *slog.Logger, maxEntryBytes int64) *Server {
-	return &Server{backend: backend, tokens: tokens, log: log, maxEntryBytes: maxEntryBytes}
+	s := &Server{backend: backend, tokens: tokens, log: log}
+	s.SetMaxEntryBytes(maxEntryBytes)
+	return s
+}
+
+// SetMaxEntryBytes updates the upload size limit enforced on new PUTs.
+// Safe to call concurrently — see internal/settings, which calls this when
+// an admin changes the setting from the UI.
+func (s *Server) SetMaxEntryBytes(n int64) {
+	s.maxEntryBytes.Store(n)
 }
 
 func (s *Server) Handler() http.Handler {
@@ -115,7 +125,7 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Content-Length header is required", http.StatusLengthRequired)
 		return
 	}
-	if r.ContentLength > s.maxEntryBytes {
+	if r.ContentLength > s.maxEntryBytes.Load() {
 		http.Error(w, "artifact exceeds maximum allowed size", http.StatusRequestEntityTooLarge)
 		return
 	}

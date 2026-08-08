@@ -29,6 +29,9 @@ func newTestStore(t *testing.T) *store.Store {
 	if _, err := pool.Exec(context.Background(), `TRUNCATE users, sessions, tokens RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
+	if _, err := pool.Exec(context.Background(), `INSERT INTO app_settings (id) VALUES (true)`); err != nil {
+		t.Fatalf("reseed app_settings: %v", err)
+	}
 	return store.New(pool)
 }
 
@@ -73,6 +76,42 @@ func TestLoginLogoutLifecycle(t *testing.T) {
 	}
 	if _, err := m.CurrentUser(ctx, sessionID); err != store.ErrNotFound {
 		t.Fatalf("after logout: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSetTTLTakesEffectOnNextLogin(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	m := NewManager(s, time.Hour)
+
+	hash, err := HashPassword("correct-password")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	if _, err := s.CreateUser(ctx, "admin@example.com", hash); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	m.SetTTL(-time.Second) // already expired the instant it's created
+	if got := m.TTL(); got != -time.Second {
+		t.Fatalf("TTL() = %v, want -1s", got)
+	}
+
+	sessionID, err := m.Login(ctx, "admin@example.com", "correct-password")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if _, err := m.CurrentUser(ctx, sessionID); err != store.ErrNotFound {
+		t.Fatalf("session created under a negative TTL should already be expired: err = %v", err)
+	}
+
+	m.SetTTL(time.Hour)
+	sessionID2, err := m.Login(ctx, "admin@example.com", "correct-password")
+	if err != nil {
+		t.Fatalf("Login after restoring TTL: %v", err)
+	}
+	if _, err := m.CurrentUser(ctx, sessionID2); err != nil {
+		t.Fatalf("session created under a 1h TTL should be valid: err = %v", err)
 	}
 }
 

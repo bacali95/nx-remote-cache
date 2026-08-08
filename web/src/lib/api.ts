@@ -44,6 +44,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body ?? {}),
+  put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body ?? {}),
   del: <T>(path: string) => request<T>("DELETE", path),
 }
 
@@ -71,4 +72,44 @@ export interface CacheEntry {
 export interface ListCacheResponse {
   entries: CacheEntry[] | null
   nextCursor?: string
+}
+
+export type StorageBackendType = "local" | "s3" | "gcs"
+
+export interface Settings {
+  storageBackend: StorageBackendType
+  localDir: string
+  s3Bucket: string
+  s3Region: string
+  s3Prefix: string
+  s3Endpoint: string
+  s3UsePathStyle: boolean
+  s3AccessKeyIdSet: boolean
+  s3SecretAccessKeySet: boolean
+  gcsBucket: string
+  gcsPrefix: string
+  gcsCredentialsSet: boolean
+  sessionTtlSeconds: number
+  maxCacheEntryBytes: number
+  updatedAt: string
+}
+
+// Secret fields are omitted entirely to mean "leave unchanged"; set to ""
+// to explicitly clear; set to a non-empty value to update. Never send the
+// existing secret back — the server never returns it, so the UI can't.
+export interface UpdateSettingsRequest {
+  storageBackend: StorageBackendType
+  localDir: string
+  s3Bucket: string
+  s3Region: string
+  s3Prefix: string
+  s3Endpoint: string
+  s3UsePathStyle: boolean
+  s3AccessKeyId?: string
+  s3SecretAccessKey?: string
+  gcsBucket: string
+  gcsPrefix: string
+  gcsCredentialsJson?: string
+  sessionTtlSeconds: number
+  maxCacheEntryBytes: number
 }

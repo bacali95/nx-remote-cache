@@ -33,7 +33,7 @@ export function LoginPage() {
     <div className="flex min-h-svh items-center justify-center bg-muted/30 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>nx-remote-cache admin</CardTitle>
+          <CardTitle>NX Remote Cache admin</CardTitle>
           <CardDescription>Sign in to manage cache entries and access tokens.</CardDescription>
         </CardHeader>
         <CardContent>

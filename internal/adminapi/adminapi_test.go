@@ -3,6 +3,8 @@ package adminapi
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,14 +17,24 @@ import (
 
 	"nx-remote-cache/internal/db"
 	"nx-remote-cache/internal/session"
+	"nx-remote-cache/internal/settings"
 	"nx-remote-cache/internal/storage"
 	"nx-remote-cache/internal/store"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// fakeMaxEntryBytesSetter satisfies the interface settings.Manager needs
+// from a data-plane server.Server, without spinning one up (adminapi
+// tests never exercise /v1/cache directly).
+type fakeMaxEntryBytesSetter struct{ n int64 }
+
+func (f *fakeMaxEntryBytesSetter) SetMaxEntryBytes(n int64) { f.n = n }
+
 // testServer wires a real Postgres-backed Server plus a temp-dir local
-// storage backend, and seeds one admin user. Skips if TEST_DATABASE_URL is
+// storage backend (also registered as app_settings.local_dir, so
+// settingsMgr.Load reconstructs an equivalent backend over the same
+// directory), and seeds one admin user. Skips if TEST_DATABASE_URL is
 // unset.
 func testServer(t *testing.T) (http.Handler, *store.Store, storage.Backend) {
 	t.Helper()
@@ -41,18 +53,36 @@ func testServer(t *testing.T) (http.Handler, *store.Store, storage.Backend) {
 	if _, err := pool.Exec(context.Background(), `TRUNCATE users, sessions, tokens RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
-	st := store.New(pool)
-
-	backend, err := storage.NewLocal(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewLocal: %v", err)
+	if _, err := pool.Exec(context.Background(), `INSERT INTO app_settings (id) VALUES (true)`); err != nil {
+		t.Fatalf("reseed app_settings: %v", err)
 	}
 
-	sessions := session.NewManager(st, time.Hour)
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := New(st, sessions, backend, log, false /* cookieSecure: plain http in tests */, time.Hour, nil /* uiFS: no static UI in tests */)
+	tempDir := t.TempDir()
+	if _, err := pool.Exec(context.Background(), `UPDATE app_settings SET local_dir = $1`, tempDir); err != nil {
+		t.Fatalf("set local_dir: %v", err)
+	}
+	st := store.New(pool)
 
-	return srv.Handler(), st, backend
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("generate encryption key: %v", err)
+	}
+	enc, err := settings.NewEncryptor(base64.StdEncoding.EncodeToString(key))
+	if err != nil {
+		t.Fatalf("NewEncryptor: %v", err)
+	}
+
+	dyn := storage.NewDynamic(nil)
+	sessions := session.NewManager(st, time.Hour)
+	settingsMgr := settings.NewManager(st, enc, dyn, sessions, &fakeMaxEntryBytesSetter{})
+	if err := settingsMgr.Load(context.Background()); err != nil {
+		t.Fatalf("settings Load: %v", err)
+	}
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := New(st, sessions, dyn, settingsMgr, log, false /* cookieSecure: plain http in tests */, nil /* uiFS: no static UI in tests */)
+
+	return srv.Handler(), st, dyn
 }
 
 func seedUser(t *testing.T, st *store.Store, email, password string) {
@@ -290,11 +320,83 @@ func TestCacheBrowseDeleteAndPrune(t *testing.T) {
 	}
 }
 
+func TestSettingsGetAndUpdateOverHTTP(t *testing.T) {
+	h, st, backend := testServer(t)
+	seedUser(t, st, "admin@example.com", "correct-password")
+	cookie := loginAndGetCookie(t, h, "admin@example.com", "correct-password")
+	ctx := context.Background()
+
+	w := doJSON(t, h, http.MethodGet, "/admin/api/settings", nil, cookie, false)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get settings: status = %d, body = %s", w.Code, w.Body)
+	}
+	var got settingsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if got.StorageBackend != "local" || got.SessionTTLSeconds != 86400 || got.MaxCacheEntryBytes != 524288000 {
+		t.Fatalf("seeded settings = %+v, want local/86400/524288000", got)
+	}
+
+	newDir := t.TempDir()
+	w = doJSON(t, h, http.MethodPut, "/admin/api/settings", updateSettingsRequest{
+		StorageBackend:     "local",
+		LocalDir:           newDir,
+		SessionTTLSeconds:  3600,
+		MaxCacheEntryBytes: 2048,
+	}, cookie, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update settings: status = %d, body = %s", w.Code, w.Body)
+	}
+	var updated settingsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated settings: %v", err)
+	}
+	if updated.LocalDir != newDir || updated.SessionTTLSeconds != 3600 || updated.MaxCacheEntryBytes != 2048 {
+		t.Fatalf("updated settings = %+v, want localDir=%q ttl=3600 maxBytes=2048", updated, newDir)
+	}
+
+	// The live backend (shared by this test's adminapi.Server) should now
+	// point at newDir.
+	if err := backend.Put(ctx, "afterswitch", bytes.NewReader([]byte("x")), 1); err != nil {
+		t.Fatalf("Put after settings switch: %v", err)
+	}
+	local, err := storage.NewLocal(newDir)
+	if err != nil {
+		t.Fatalf("NewLocal(newDir): %v", err)
+	}
+	if exists, _ := local.Exists(ctx, "afterswitch"); !exists {
+		t.Fatalf("entry written after settings update did not land in newDir")
+	}
+
+	// Invalid update (s3 without a bucket) must be rejected and leave
+	// settings untouched.
+	w = doJSON(t, h, http.MethodPut, "/admin/api/settings", updateSettingsRequest{
+		StorageBackend:     "s3",
+		SessionTTLSeconds:  3600,
+		MaxCacheEntryBytes: 2048,
+	}, cookie, true)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("update with missing s3 bucket: status = %d, want 400, body = %s", w.Code, w.Body)
+	}
+
+	w = doJSON(t, h, http.MethodGet, "/admin/api/settings", nil, cookie, false)
+	var stillLocal settingsResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &stillLocal)
+	if stillLocal.StorageBackend != "local" || stillLocal.LocalDir != newDir {
+		t.Fatalf("settings changed after a rejected update: %+v", stillLocal)
+	}
+}
+
 // localEntryPath reaches into the *storage.Local backend to get the file
-// path for a hash, so the test can backdate its mtime. Local is the only
-// backend under test here (see testServer), so the type assertion is safe.
+// path for a hash, so the test can backdate its mtime. testServer wraps it
+// in a *storage.Dynamic; unwrap that first. Local is the only backend
+// under test here, so the final type assertion is safe.
 func localEntryPath(t *testing.T, backend storage.Backend, hash string) string {
 	t.Helper()
+	if dyn, ok := backend.(*storage.Dynamic); ok {
+		backend = dyn.Active()
+	}
 	local, ok := backend.(*storage.Local)
 	if !ok {
 		t.Fatalf("localEntryPath: backend is not *storage.Local")

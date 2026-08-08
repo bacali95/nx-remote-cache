@@ -31,8 +31,13 @@ func newTestStore(t *testing.T) *Store {
 	}
 	t.Cleanup(pool.Close)
 
+	// app_settings.updated_by references users(id), so TRUNCATE ... CASCADE
+	// on users also empties the settings singleton — reseed its one row.
 	if _, err := pool.Exec(context.Background(), `TRUNCATE users, sessions, tokens RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate tables: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), `INSERT INTO app_settings (id) VALUES (true)`); err != nil {
+		t.Fatalf("reseed app_settings: %v", err)
 	}
 
 	return New(pool)

@@ -5,6 +5,7 @@ import { LoginPage } from "@/pages/LoginPage"
 import { CachePage } from "@/pages/CachePage"
 import { TokensPage } from "@/pages/TokensPage"
 import { UsersPage } from "@/pages/UsersPage"
+import { SettingsPage } from "@/pages/SettingsPage"
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -28,6 +29,7 @@ export default function App() {
         <Route index element={<CachePage />} />
         <Route path="tokens" element={<TokensPage />} />
         <Route path="users" element={<UsersPage />} />
+        <Route path="settings" element={<SettingsPage />} />
       </Route>
     </Routes>
   )

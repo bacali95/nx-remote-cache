@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
 )
@@ -30,12 +31,24 @@ type S3Options struct {
 	Prefix       string
 	Endpoint     string // optional: non-AWS S3-compatible endpoint
 	UsePathStyle bool
+
+	// AccessKeyID/SecretAccessKey are optional static credentials (e.g.
+	// entered via the admin Settings UI). If either is empty, the AWS
+	// default credential chain is used instead (env vars, IAM role,
+	// shared config file, ...).
+	AccessKeyID     string
+	SecretAccessKey string
 }
 
 func NewS3(ctx context.Context, opts S3Options) (*S3, error) {
 	loadOpts := []func(*awsconfig.LoadOptions) error{}
 	if opts.Region != "" {
 		loadOpts = append(loadOpts, awsconfig.WithRegion(opts.Region))
+	}
+	if opts.AccessKeyID != "" && opts.SecretAccessKey != "" {
+		loadOpts = append(loadOpts, awsconfig.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(opts.AccessKeyID, opts.SecretAccessKey, ""),
+		))
 	}
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {

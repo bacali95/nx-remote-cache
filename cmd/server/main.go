@@ -1,7 +1,9 @@
 // Command server runs an Nx self-hosted remote cache server:
 // https://nx.dev/docs/kb/self-hosted-caching#build-your-own-caching-server
 // alongside an embedded admin UI for browsing/pruning the cache and
-// managing users and access tokens.
+// managing users, access tokens, and runtime settings (storage backend,
+// session TTL, max cache entry size — all live in Postgres and are
+// editable from the UI, not env vars).
 package main
 
 import (
@@ -21,6 +23,7 @@ import (
 	"nx-remote-cache/internal/db"
 	"nx-remote-cache/internal/server"
 	"nx-remote-cache/internal/session"
+	"nx-remote-cache/internal/settings"
 	"nx-remote-cache/internal/storage"
 	"nx-remote-cache/internal/store"
 	webui "nx-remote-cache/web"
@@ -41,6 +44,11 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	enc, err := settings.NewEncryptor(cfg.SettingsEncryptionKey)
+	if err != nil {
+		return fmt.Errorf("SETTINGS_ENCRYPTION_KEY: %w", err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -58,18 +66,26 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
-	backend, err := newBackend(ctx, cfg)
-	if err != nil {
-		return err
-	}
-
 	uiFS, err := webui.DistFS()
 	if err != nil {
 		return fmt.Errorf("load embedded admin UI: %w", err)
 	}
 
-	dataSrv := server.New(backend, auth.NewCacheTokenAuth(st), log, cfg.MaxEntryBytes)
-	adminSrv := adminapi.New(st, session.NewManager(st, cfg.SessionTTL), backend, log, cfg.CookieSecure, cfg.SessionTTL, uiFS)
+	// The storage backend, session TTL, and max entry size are runtime
+	// settings (internal/settings) rather than fixed at startup: dynBackend
+	// is a swappable indirection both servers hold onto, and
+	// settingsMgr.Load populates it (plus the session/server atomics) from
+	// whatever's currently in Postgres before either server starts
+	// accepting requests.
+	dynBackend := storage.NewDynamic(nil)
+	sessions := session.NewManager(st, 0)
+	dataSrv := server.New(dynBackend, auth.NewCacheTokenAuth(st), log, 0)
+	settingsMgr := settings.NewManager(st, enc, dynBackend, sessions, dataSrv)
+	if err := settingsMgr.Load(ctx); err != nil {
+		return fmt.Errorf("load settings: %w", err)
+	}
+
+	adminSrv := adminapi.New(st, sessions, dynBackend, settingsMgr, log, cfg.CookieSecure, uiFS)
 
 	mux := http.NewServeMux()
 	mux.Handle("/v1/", dataSrv.Handler())
@@ -85,7 +101,7 @@ func run(log *slog.Logger) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", cfg.Addr, "storage", cfg.Storage)
+		log.Info("listening", "addr", cfg.Addr)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -153,24 +169,4 @@ func bootstrapAdmin(ctx context.Context, st *store.Store, cfg *config.Config, lo
 	}
 	log.Info("created bootstrap admin user", "email", cfg.AdminBootstrapEmail)
 	return nil
-}
-
-func newBackend(ctx context.Context, cfg *config.Config) (storage.Backend, error) {
-	switch cfg.Storage {
-	case config.StorageS3:
-		return storage.NewS3(ctx, storage.S3Options{
-			Bucket:       cfg.S3Bucket,
-			Region:       cfg.S3Region,
-			Prefix:       cfg.S3Prefix,
-			Endpoint:     cfg.S3Endpoint,
-			UsePathStyle: cfg.S3UsePathStyle,
-		})
-	case config.StorageGCS:
-		return storage.NewGCS(ctx, storage.GCSOptions{
-			Bucket: cfg.GCSBucket,
-			Prefix: cfg.GCSPrefix,
-		})
-	default:
-		return storage.NewLocal(cfg.LocalDir)
-	}
 }

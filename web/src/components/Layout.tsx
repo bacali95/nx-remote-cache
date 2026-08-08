@@ -7,6 +7,7 @@ const navItems = [
   { to: "/", label: "Cache" },
   { to: "/tokens", label: "Tokens" },
   { to: "/users", label: "Users" },
+  { to: "/settings", label: "Settings" },
 ]
 
 export function Layout() {
@@ -23,7 +24,7 @@ export function Layout() {
       <header className="border-b bg-background">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-6">
-            <span className="font-semibold">nx-remote-cache</span>
+            <span className="font-semibold">NX Remote Cache</span>
             <nav className="flex items-center gap-1">
               {navItems.map((item) => (
                 <NavLink

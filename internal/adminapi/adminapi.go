@@ -8,10 +8,10 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"nx-remote-cache/internal/httplog"
 	"nx-remote-cache/internal/session"
+	"nx-remote-cache/internal/settings"
 	"nx-remote-cache/internal/storage"
 	"nx-remote-cache/internal/store"
 )
@@ -20,21 +20,21 @@ type Server struct {
 	store        *store.Store
 	sessions     *session.Manager
 	backend      storage.Backend
+	settings     *settings.Manager
 	log          *slog.Logger
 	cookieSecure bool
-	sessionTTL   time.Duration
 	loginLimiter *loginLimiter
 	uiFS         fs.FS // nil skips serving the static UI (e.g. in tests)
 }
 
-func New(st *store.Store, sessions *session.Manager, backend storage.Backend, log *slog.Logger, cookieSecure bool, sessionTTL time.Duration, uiFS fs.FS) *Server {
+func New(st *store.Store, sessions *session.Manager, backend storage.Backend, settingsMgr *settings.Manager, log *slog.Logger, cookieSecure bool, uiFS fs.FS) *Server {
 	return &Server{
 		store:        st,
 		sessions:     sessions,
 		backend:      backend,
+		settings:     settingsMgr,
 		log:          log,
 		cookieSecure: cookieSecure,
-		sessionTTL:   sessionTTL,
 		loginLimiter: newLoginLimiter(),
 		uiFS:         uiFS,
 	}
@@ -60,6 +60,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /admin/api/cache/{hash}", s.protected(s.handleDeleteCacheEntry))
 	mux.HandleFunc("POST /admin/api/cache/bulk-delete", s.protected(s.handleBulkDelete))
 	mux.HandleFunc("POST /admin/api/cache/prune", s.protected(s.handlePrune))
+
+	mux.HandleFunc("GET /admin/api/settings", s.protected(s.handleGetSettings))
+	mux.HandleFunc("PUT /admin/api/settings", s.protected(s.handleUpdateSettings))
 
 	if s.uiFS != nil {
 		mux.Handle("GET /admin/", s.spaHandler())

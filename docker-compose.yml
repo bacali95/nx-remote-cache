@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nxcache-dev-password}
       POSTGRES_DB: nxcache
     ports:
-      - 5433:5432
+      - "5433:5432" # host 5433 avoids clashing with a local postgres; containers still talk on 5432
     volumes:
       - pg-data:/var/lib/postgresql/data
     healthcheck:
@@ -24,12 +24,17 @@ services:
       - "3000:3000"
     environment:
       PORT: "3000"
-      STORAGE_BACKEND: local
-      CACHE_DIR: /data
+      # Container-to-container traffic uses postgres's internal port (5432)
+      # regardless of the host-side mapping above.
       DATABASE_URL: postgres://nxcache:${POSTGRES_PASSWORD:-nxcache-dev-password}@postgres:5432/nxcache?sslmode=disable
+      # Encrypts cloud credentials (if configured via the Settings page) at
+      # rest in Postgres. Generate with: openssl rand -base64 32
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in .env — see README}
       # First-run only: creates one admin user if the users table is empty.
       # Log in and create real accounts/tokens from the UI, then you can
-      # drop these two.
+      # drop these two. Storage backend, session TTL, and max cache entry
+      # size are configured from the admin UI's Settings page, not env
+      # vars — they default sensibly (local disk, 24h, 500MB) on first run.
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@example.com}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-change-me-immediately}
       # Plain http:// locally; set true (the default in production) once

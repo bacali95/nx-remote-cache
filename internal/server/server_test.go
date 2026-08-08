@@ -162,6 +162,29 @@ func TestPutWithoutContentLengthReturns411(t *testing.T) {
 	}
 }
 
+func TestSetMaxEntryBytesTakesEffectImmediately(t *testing.T) {
+	srv := newTestServer(t)
+	h := srv.Handler()
+
+	payload := []byte("0123456789")
+	resp := doRequest(t, h, http.MethodPut, "/v1/cache/beforelimit", writeToken, payload)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("PUT under limit: status = %d, want 200", resp.Code)
+	}
+
+	srv.SetMaxEntryBytes(5)
+	resp = doRequest(t, h, http.MethodPut, "/v1/cache/afterlimit", writeToken, payload)
+	if resp.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("PUT over new limit: status = %d, want 413", resp.Code)
+	}
+
+	srv.SetMaxEntryBytes(10 * 1024 * 1024)
+	resp = doRequest(t, h, http.MethodPut, "/v1/cache/afterraise", writeToken, payload)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("PUT after raising limit back: status = %d, want 200", resp.Code)
+	}
+}
+
 func TestInvalidHashRejected(t *testing.T) {
 	h := newTestServer(t).Handler()
 	resp := doRequest(t, h, http.MethodGet, "/v1/cache/abc%2e%2e%24def", readToken, nil)

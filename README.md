@@ -30,44 +30,60 @@ and access tokens from the UI itself.
 - **Tokens** — create/revoke bearer tokens used by CI (`read` or `write`
   scope). The raw token is shown once at creation time and never again.
 - **Users** — create/delete admin accounts, change your own password.
+- **Settings** — storage backend (local/S3/GCS) and its credentials,
+  session lifetime, max cache entry size. See below.
 
-All cache-access tokens and admin users live in Postgres — there's no
-env-var token list anymore (see [Authentication](#authentication) below).
+All cache-access tokens, admin users, and runtime settings live in
+Postgres — there's no env-var token list or storage config anymore (see
+[Authentication](#authentication) and
+[Runtime settings](#runtime-settings-storage-backend-session-ttl-max-entry-size)
+below).
 
-## Storage backend configuration
+## Runtime settings: storage backend, session TTL, max entry size
+
+These are **not** env vars — they're configured from the admin UI's
+Settings page, stored in Postgres, and take effect immediately on save,
+with no restart. Changing the storage backend is connectivity-tested
+before it's applied; if the test fails (bad bucket, bad credentials,
+unreachable endpoint), nothing changes.
+
+- **Local disk** — a directory path. Suited to a single always-on instance
+  with a persistent volume. Defaults to `./data` (which resolves to `/data`
+  in the Docker image, matching its mounted volume).
+- **S3** — bucket, region, prefix, endpoint (for R2/MinIO), path-style
+  flag, and optionally a static access key/secret pair. Leave the
+  credentials blank to use the AWS default credential chain (IAM role, env
+  vars on the host) instead.
+- **GCS** — bucket, prefix, and optionally a service-account key JSON.
+  Leave it blank to use Application Default Credentials (workload
+  identity, `gcloud auth application-default login`) instead.
+
+Use S3/GCS when the server runs as multiple replicas or on ephemeral
+infrastructure (recommended for anything backing CI at scale) — a bucket
+is the shared durable store that survives any single instance restarting.
+
+Static cloud credentials entered here are encrypted (AES-256-GCM) before
+being stored in Postgres — see `SETTINGS_ENCRYPTION_KEY` below. The raw
+secret is never sent back to the browser after saving; the Settings page
+shows "configured" and lets you clear or replace it, not view it.
+
+The admin UI's "prune by age" and "browse" features scan every entry (most
+object stores have no server-side "modified before X" filter) — fine for a
+self-hosted cache, but expect a large S3/GCS bucket to take a while to
+prune in one call.
+
+## Configuration (env vars)
+
+What's left in env vars is genuinely infra-level — where the database is,
+how the process listens — plus one encryption key that must not itself
+live in the database it protects.
 
 | Variable | Default | Notes |
 |---|---|---|
 | `PORT` | `3000` | listen port |
-| `STORAGE_BACKEND` | `local` | `local`, `s3`, or `gcs` |
-| `CACHE_DIR` | `/var/lib/nx-remote-cache` | local backend only |
-| `S3_BUCKET` / `S3_REGION` / `S3_PREFIX` | — | s3 backend |
-| `S3_ENDPOINT` | — | set for R2/MinIO/non-AWS S3-compatible stores |
-| `S3_USE_PATH_STYLE` | `false` | set `true` for MinIO |
-| `GCS_BUCKET` / `GCS_PREFIX` | — | gcs backend |
-| `GOOGLE_APPLICATION_CREDENTIALS` | — | path to a service-account key JSON; unset when running on GKE/GCE/Cloud Run with workload identity |
-| `MAX_CACHE_ENTRY_BYTES` | `524288000` (500MB) | reject larger uploads |
-
-Use `local` for a single always-on instance with a persistent volume. Use
-`s3` or `gcs` when the server runs as multiple replicas or on ephemeral
-infrastructure (recommended for anything backing CI at scale) — a bucket is
-the shared durable store. `gcs` authenticates via Application Default
-Credentials: a service account key file (`GOOGLE_APPLICATION_CREDENTIALS`),
-GKE/GCE workload identity, or `gcloud auth application-default login`
-locally — grant that identity `roles/storage.objectAdmin` on the bucket.
-
-The admin UI's "prune by age" and "browse" features scan every entry (most
-object stores have no server-side "modified before X" filter) — fine for a
-self-hosted cache, but expect a large `s3`/`gcs` bucket to take a while to
-prune in one call.
-
-## Admin/auth configuration
-
-| Variable | Default | Notes |
-|---|---|---|
 | `DATABASE_URL` | — | **required.** Postgres connection string, e.g. `postgres://user:pass@host:5432/nxcache?sslmode=disable` |
+| `SETTINGS_ENCRYPTION_KEY` | — | **required.** Base64, 32 bytes. Encrypts cloud credentials at rest. Generate with `openssl rand -base64 32`. Losing/rotating this key makes any previously-saved cloud credentials undecryptable — you'd need to re-enter them from the Settings page. |
 | `ADMIN_BOOTSTRAP_EMAIL` / `ADMIN_BOOTSTRAP_PASSWORD` | — | creates one admin user on startup, only if the `users` table is empty. Safe to leave set indefinitely — it's a no-op once any user exists. |
-| `SESSION_TTL` | `24h` | admin login session lifetime |
 | `COOKIE_SECURE` | `true` | set `false` only for local `http://` development; must be `true` once served over TLS |
 
 Migrations run automatically on startup (embedded, tracked in a
@@ -89,8 +105,9 @@ Without Docker, point `make run` at a Postgres instance you already have
 running:
 
 ```bash
-DATABASE_URL=postgres://... ADMIN_BOOTSTRAP_EMAIL=admin@example.com \
-  ADMIN_BOOTSTRAP_PASSWORD=changeme COOKIE_SECURE=false make run
+DATABASE_URL=postgres://... SETTINGS_ENCRYPTION_KEY=$(openssl rand -base64 32) \
+  ADMIN_BOOTSTRAP_EMAIL=admin@example.com ADMIN_BOOTSTRAP_PASSWORD=changeme \
+  COOKIE_SECURE=false make run
 ```
 
 The frontend needs a one-time build before `go build`/`go run` will work at

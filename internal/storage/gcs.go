@@ -11,6 +11,7 @@ import (
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 )
 
 // GCS stores cache artifacts in a Google Cloud Storage bucket. Like the S3
@@ -27,10 +28,23 @@ type GCS struct {
 type GCSOptions struct {
 	Bucket string
 	Prefix string
+
+	// CredentialsJSON is an optional service-account key (e.g. entered via
+	// the admin Settings UI). If empty, Application Default Credentials
+	// are used instead.
+	CredentialsJSON []byte
 }
 
 func NewGCS(ctx context.Context, opts GCSOptions) (*GCS, error) {
-	client, err := storage.NewClient(ctx)
+	var clientOpts []option.ClientOption
+	if len(opts.CredentialsJSON) > 0 {
+		// Type-specific rather than the deprecated WithCredentialsJSON:
+		// this is always a service-account key entered via the admin
+		// Settings UI, so declaring that type up front avoids the
+		// unvalidated-credential-type risk the deprecation warns about.
+		clientOpts = append(clientOpts, option.WithAuthCredentialsJSON(option.ServiceAccount, opts.CredentialsJSON))
+	}
+	client, err := storage.NewClient(ctx, clientOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("create GCS client: %w", err)
 	}
