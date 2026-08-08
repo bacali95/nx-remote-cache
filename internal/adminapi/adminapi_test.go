@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -442,6 +443,56 @@ func TestCacheListShowsReadStatsAndDeleteClearsThem(t *testing.T) {
 	}
 	if _, ok := stats["readtracked"]; ok {
 		t.Fatalf("read stats for readtracked should be cleared after delete")
+	}
+}
+
+func TestCacheListSortOrder(t *testing.T) {
+	h, st, backend := testServer(t)
+	seedUser(t, st, "admin@example.com", "correct-password")
+	cookie := loginAndGetCookie(t, h, "admin@example.com", "correct-password")
+	ctx := context.Background()
+
+	// "older" and "newer" are never read, so they sort by mod time alone.
+	// "readnow" was read just now, so it must sort ahead of both even
+	// though its mod time is backdated further than either.
+	for _, hash := range []string{"older", "newer", "readnow"} {
+		if err := backend.Put(ctx, hash, bytes.NewReader([]byte("x")), 1); err != nil {
+			t.Fatalf("seed %s: %v", hash, err)
+		}
+	}
+	now := time.Now()
+	if err := os.Chtimes(localEntryPath(t, backend, "older"), now, now.Add(-2*time.Hour)); err != nil {
+		t.Fatalf("backdate older: %v", err)
+	}
+	if err := os.Chtimes(localEntryPath(t, backend, "newer"), now, now.Add(-1*time.Hour)); err != nil {
+		t.Fatalf("backdate newer: %v", err)
+	}
+	if err := os.Chtimes(localEntryPath(t, backend, "readnow"), now, now.Add(-3*time.Hour)); err != nil {
+		t.Fatalf("backdate readnow: %v", err)
+	}
+	if err := st.RecordCacheRead(ctx, "readnow"); err != nil {
+		t.Fatalf("RecordCacheRead: %v", err)
+	}
+
+	w := doJSON(t, h, http.MethodGet, "/admin/api/cache", nil, cookie, false)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list cache: status = %d, body = %s", w.Code, w.Body)
+	}
+	var page listCacheResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(page.Entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d: %+v", len(page.Entries), page.Entries)
+	}
+
+	var order []string
+	for _, e := range page.Entries {
+		order = append(order, e.Hash)
+	}
+	want := []string{"readnow", "newer", "older"}
+	if !slices.Equal(order, want) {
+		t.Fatalf("entry order = %v, want %v", order, want)
 	}
 }
 
