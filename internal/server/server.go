@@ -67,7 +67,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	if size > 0 {

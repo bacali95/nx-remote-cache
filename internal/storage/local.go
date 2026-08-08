@@ -50,7 +50,7 @@ func (l *Local) Put(_ context.Context, hash string, r io.Reader, size int64) err
 		return fmt.Errorf("create temp file: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once renamed
+	defer func() { _ = os.Remove(tmpName) }() // no-op once renamed
 
 	n, err := io.Copy(tmp, io.LimitReader(r, size))
 	closeErr := tmp.Close()
@@ -85,7 +85,7 @@ func (l *Local) Get(_ context.Context, hash string) (io.ReadCloser, int64, error
 	}
 	info, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, 0, err
 	}
 	return f, info.Size(), nil

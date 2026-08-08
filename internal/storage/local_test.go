@@ -34,7 +34,7 @@ func TestLocalPutGetExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	if size != int64(len(payload)) {
 		t.Fatalf("size = %d, want %d", size, len(payload))
 	}
