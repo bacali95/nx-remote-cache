@@ -49,7 +49,7 @@ export function CachePage() {
       const qs = new URLSearchParams()
       if (cursor) qs.set("cursor", cursor)
       const page = await api.get<ListCacheResponse>(`/cache?${qs.toString()}`)
-      setEntries((prev) => (replace ? page.entries ?? [] : [...prev, ...(page.entries ?? [])]))
+      setEntries((prev) => (replace ? (page.entries ?? []) : [...prev, ...(page.entries ?? [])]))
       setNextCursor(page.nextCursor)
     } catch {
       toast.error("Failed to load cache entries")
@@ -72,7 +72,9 @@ export function CachePage() {
   }
 
   function toggleAll() {
-    setSelected((prev) => (prev.size === entries.length ? new Set() : new Set(entries.map((e) => e.hash))))
+    setSelected((prev) =>
+      prev.size === entries.length ? new Set() : new Set(entries.map((e) => e.hash))
+    )
   }
 
   async function deleteOne(hash: string) {
@@ -106,7 +108,9 @@ export function CachePage() {
     }
     try {
       const result = await api.post<{ deleted: number }>("/cache/prune", { olderThanDays: days })
-      toast.success(`Pruned ${result.deleted} entr${result.deleted === 1 ? "y" : "ies"} older than ${days} days`)
+      toast.success(
+        `Pruned ${result.deleted} entr${result.deleted === 1 ? "y" : "ies"} older than ${days} days`
+      )
       setPruneOpen(false)
       load()
     } catch {
@@ -129,7 +133,8 @@ export function CachePage() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete {selected.size} cache entries?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This permanently removes the selected artifacts from storage. This cannot be undone.
+                  This permanently removes the selected artifacts from storage. This cannot be
+                  undone.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -224,12 +229,15 @@ export function CachePage() {
                     <AlertDialogHeader>
                       <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        Permanently removes <span className="font-mono">{entry.hash}</span> from storage.
+                        Permanently removes <span className="font-mono">{entry.hash}</span> from
+                        storage.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => deleteOne(entry.hash)}>Delete</AlertDialogAction>
+                      <AlertDialogAction onClick={() => deleteOne(entry.hash)}>
+                        Delete
+                      </AlertDialogAction>
                     </AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>
@@ -248,7 +256,12 @@ export function CachePage() {
 
       {nextCursor && (
         <div className="flex justify-center">
-          <Button variant="outline" size="sm" disabled={loading} onClick={() => load(nextCursor, false)}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={loading}
+            onClick={() => load(nextCursor, false)}
+          >
             {loading ? "Loading…" : "Load more"}
           </Button>
         </div>

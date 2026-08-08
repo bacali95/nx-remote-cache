@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { api, ApiError, type Settings, type StorageBackendType, type UpdateSettingsRequest } from "@/lib/api"
+import {
+  api,
+  ApiError,
+  type Settings,
+  type StorageBackendType,
+  type UpdateSettingsRequest,
+} from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 // A secret's local state: `undefined` means "user hasn't touched this
@@ -170,7 +170,9 @@ export function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Storage backend</CardTitle>
-          <CardDescription>Where cache artifacts are stored. Switching backends is tested before it's applied.</CardDescription>
+          <CardDescription>
+            Where cache artifacts are stored. Switching backends is tested before it's applied.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Tabs value={backend} onValueChange={(v) => setBackend(v as StorageBackendType)}>
@@ -183,7 +185,11 @@ export function SettingsPage() {
             <TabsContent value="local" className="flex flex-col gap-4 pt-4">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="local-dir">Directory</Label>
-                <Input id="local-dir" value={localDir} onChange={(e) => setLocalDir(e.target.value)} />
+                <Input
+                  id="local-dir"
+                  value={localDir}
+                  onChange={(e) => setLocalDir(e.target.value)}
+                />
               </div>
             </TabsContent>
 
@@ -191,19 +197,35 @@ export function SettingsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="s3-bucket">Bucket</Label>
-                  <Input id="s3-bucket" value={s3Bucket} onChange={(e) => setS3Bucket(e.target.value)} />
+                  <Input
+                    id="s3-bucket"
+                    value={s3Bucket}
+                    onChange={(e) => setS3Bucket(e.target.value)}
+                  />
                 </div>
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="s3-region">Region</Label>
-                  <Input id="s3-region" value={s3Region} onChange={(e) => setS3Region(e.target.value)} />
+                  <Input
+                    id="s3-region"
+                    value={s3Region}
+                    onChange={(e) => setS3Region(e.target.value)}
+                  />
                 </div>
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="s3-prefix">Prefix (optional)</Label>
-                  <Input id="s3-prefix" value={s3Prefix} onChange={(e) => setS3Prefix(e.target.value)} />
+                  <Input
+                    id="s3-prefix"
+                    value={s3Prefix}
+                    onChange={(e) => setS3Prefix(e.target.value)}
+                  />
                 </div>
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="s3-endpoint">Endpoint (R2/MinIO, optional)</Label>
-                  <Input id="s3-endpoint" value={s3Endpoint} onChange={(e) => setS3Endpoint(e.target.value)} />
+                  <Input
+                    id="s3-endpoint"
+                    value={s3Endpoint}
+                    onChange={(e) => setS3Endpoint(e.target.value)}
+                  />
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -212,7 +234,9 @@ export function SettingsPage() {
                   checked={s3UsePathStyle}
                   onCheckedChange={(v) => setS3UsePathStyle(v === true)}
                 />
-                <Label htmlFor="s3-path-style">Use path-style addressing (required for MinIO)</Label>
+                <Label htmlFor="s3-path-style">
+                  Use path-style addressing (required for MinIO)
+                </Label>
               </div>
               <Separator />
               <SecretField
@@ -230,8 +254,8 @@ export function SettingsPage() {
                 onChange={setS3SecretAccessKey}
               />
               <p className="text-xs text-muted-foreground">
-                Leave both blank to use the AWS default credential chain (IAM role, env vars on the host, etc.)
-                instead of static credentials.
+                Leave both blank to use the AWS default credential chain (IAM role, env vars on the
+                host, etc.) instead of static credentials.
               </p>
             </TabsContent>
 
@@ -239,11 +263,19 @@ export function SettingsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="gcs-bucket">Bucket</Label>
-                  <Input id="gcs-bucket" value={gcsBucket} onChange={(e) => setGcsBucket(e.target.value)} />
+                  <Input
+                    id="gcs-bucket"
+                    value={gcsBucket}
+                    onChange={(e) => setGcsBucket(e.target.value)}
+                  />
                 </div>
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="gcs-prefix">Prefix (optional)</Label>
-                  <Input id="gcs-prefix" value={gcsPrefix} onChange={(e) => setGcsPrefix(e.target.value)} />
+                  <Input
+                    id="gcs-prefix"
+                    value={gcsPrefix}
+                    onChange={(e) => setGcsPrefix(e.target.value)}
+                  />
                 </div>
               </div>
               <Separator />
@@ -255,8 +287,8 @@ export function SettingsPage() {
                 onChange={setGcsCredentialsJson}
               />
               <p className="text-xs text-muted-foreground">
-                Leave blank to use Application Default Credentials (workload identity, gcloud ADC, etc.) instead
-                of a static key.
+                Leave blank to use Application Default Credentials (workload identity, gcloud ADC,
+                etc.) instead of a static key.
               </p>
             </TabsContent>
           </Tabs>

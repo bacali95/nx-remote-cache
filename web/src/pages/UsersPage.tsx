@@ -117,12 +117,19 @@ export function UsersPage() {
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Create admin user</DialogTitle>
-                <DialogDescription>They'll be able to sign in and manage the cache.</DialogDescription>
+                <DialogDescription>
+                  They'll be able to sign in and manage the cache.
+                </DialogDescription>
               </DialogHeader>
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="new-email">Email</Label>
-                  <Input id="new-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                  <Input
+                    id="new-email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
                 </div>
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="new-password">Password</Label>
@@ -156,7 +163,8 @@ export function UsersPage() {
             {users.map((u) => (
               <TableRow key={u.id}>
                 <TableCell>
-                  {u.email} {u.id === currentUser?.id && <span className="text-muted-foreground">(you)</span>}
+                  {u.email}{" "}
+                  {u.id === currentUser?.id && <span className="text-muted-foreground">(you)</span>}
                 </TableCell>
                 <TableCell>{formatDate(u.createdAt)}</TableCell>
                 <TableCell>
@@ -170,11 +178,15 @@ export function UsersPage() {
                       <AlertDialogContent>
                         <AlertDialogHeader>
                           <AlertDialogTitle>Delete {u.email}?</AlertDialogTitle>
-                          <AlertDialogDescription>They'll immediately lose access.</AlertDialogDescription>
+                          <AlertDialogDescription>
+                            They'll immediately lose access.
+                          </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
                           <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => deleteUser(u.id)}>Delete</AlertDialogAction>
+                          <AlertDialogAction onClick={() => deleteUser(u.id)}>
+                            Delete
+                          </AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>

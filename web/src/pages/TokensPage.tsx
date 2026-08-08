@@ -108,7 +108,12 @@ export function TokensPage() {
                     <code className="text-xs">NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN</code>.
                   </DialogDescription>
                 </DialogHeader>
-                <Input readOnly value={freshToken} onFocus={(e) => e.target.select()} className="font-mono text-sm" />
+                <Input
+                  readOnly
+                  value={freshToken}
+                  onFocus={(e) => e.target.select()}
+                  className="font-mono text-sm"
+                />
                 <DialogFooter>
                   <Button onClick={() => setCreateOpen(false)}>Done</Button>
                 </DialogFooter>
@@ -187,7 +192,9 @@ export function TokensPage() {
               <TableCell>{t.lastUsedAt ? formatDate(t.lastUsedAt) : "never"}</TableCell>
               <TableCell>
                 {t.revokedAt ? (
-                  <span className="text-xs text-muted-foreground">Revoked {formatDate(t.revokedAt)}</span>
+                  <span className="text-xs text-muted-foreground">
+                    Revoked {formatDate(t.revokedAt)}
+                  </span>
                 ) : (
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
