@@ -22,4 +22,6 @@ COPY --from=build --chown=nonroot:nonroot /out/data /data
 USER nonroot:nonroot
 ENV CACHE_DIR=/data
 EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD ["/server", "healthcheck"]
 ENTRYPOINT ["/server"]
