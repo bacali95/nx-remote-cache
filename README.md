@@ -93,9 +93,11 @@ export NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=$CACHE_TOKEN
 
 - `.github/workflows/ci.yml` — on every push/PR: `go vet`, `go build`,
   `go test -race -cover`, `golangci-lint`, and a Docker build-only check.
-- `.github/workflows/docker-publish.yml` — on push to `main` or a `vX.Y.Z`
-  tag: builds a multi-arch (amd64/arm64) image and pushes it to
-  `ghcr.io/<owner>/<repo>`.
+- `.github/workflows/docker-publish.yml` — on push of a `vX.Y.Z` tag only:
+  builds a multi-arch (amd64/arm64) image and pushes it to
+  `ghcr.io/<owner>/<repo>`. Merges to `main` run CI but do not publish an
+  image — cut a tag (`git tag v0.1.0 && git push origin v0.1.0`) when you
+  want a new release.
 
 Deploy by pulling the published image and running it with your storage/auth
 env vars set (e.g. as a systemd unit, a Kubernetes Deployment, or an ECS
