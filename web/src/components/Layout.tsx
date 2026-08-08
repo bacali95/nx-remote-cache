@@ -26,7 +26,7 @@ export function Layout() {
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-6">
             <span className="flex items-center gap-2 font-semibold">
-              <img src="/admin/nx-mark.svg" alt="" className="size-5" />
+              <img src="/admin/nx-mark.svg" alt="" className="size-5 dark:invert" />
               NX Remote Cache
             </span>
             <nav className="flex items-center gap-1">
@@ -37,7 +37,7 @@ export function Layout() {
                   className={({ isActive }) =>
                     cn(
                       "rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent",
-                      isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground",
+                      isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground"
                     )
                   }
                 >
