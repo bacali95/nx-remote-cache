@@ -42,11 +42,21 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      - name: Install admin UI deps
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Lint admin UI
+        working-directory: web
+        run: bun run lint
+
+      - name: Test admin UI
+        working-directory: web
+        run: bun run test
+
       - name: Build admin UI
         working-directory: web
-        run: |
-          bun install --frozen-lockfile
-          bun run build
+        run: bun run build
 
       - name: Vet
         run: go vet ./...
