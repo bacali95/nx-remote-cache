@@ -14,6 +14,7 @@ type StorageBackend string
 const (
 	StorageLocal StorageBackend = "local"
 	StorageS3    StorageBackend = "s3"
+	StorageGCS   StorageBackend = "gcs"
 )
 
 type Config struct {
@@ -30,6 +31,10 @@ type Config struct {
 	S3Prefix       string
 	S3Endpoint     string // optional: for R2/MinIO/other S3-compatible stores
 	S3UsePathStyle bool
+
+	// gcs backend
+	GCSBucket string
+	GCSPrefix string
 
 	// auth
 	ReadTokens  []string
@@ -52,6 +57,8 @@ func FromEnv() (*Config, error) {
 		S3Prefix:       os.Getenv("S3_PREFIX"),
 		S3Endpoint:     os.Getenv("S3_ENDPOINT"),
 		S3UsePathStyle: getEnvBool("S3_USE_PATH_STYLE", false),
+		GCSBucket:      os.Getenv("GCS_BUCKET"),
+		GCSPrefix:      os.Getenv("GCS_PREFIX"),
 		ReadTokens:     splitCSV(os.Getenv("CACHE_READ_TOKENS")),
 		WriteTokens:    splitCSV(os.Getenv("CACHE_WRITE_TOKENS")),
 		MaxEntryBytes:  getEnvInt64("MAX_CACHE_ENTRY_BYTES", 500*1024*1024), // 500MB default
@@ -71,8 +78,12 @@ func FromEnv() (*Config, error) {
 		if cfg.S3Bucket == "" {
 			return nil, fmt.Errorf("S3_BUCKET is required when STORAGE_BACKEND=s3")
 		}
+	case StorageGCS:
+		if cfg.GCSBucket == "" {
+			return nil, fmt.Errorf("GCS_BUCKET is required when STORAGE_BACKEND=gcs")
+		}
 	default:
-		return nil, fmt.Errorf("unknown STORAGE_BACKEND %q (want %q or %q)", cfg.Storage, StorageLocal, StorageS3)
+		return nil, fmt.Errorf("unknown STORAGE_BACKEND %q (want %q, %q or %q)", cfg.Storage, StorageLocal, StorageS3, StorageGCS)
 	}
 
 	return cfg, nil

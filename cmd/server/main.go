@@ -80,6 +80,11 @@ func newBackend(ctx context.Context, cfg *config.Config) (storage.Backend, error
 			Endpoint:     cfg.S3Endpoint,
 			UsePathStyle: cfg.S3UsePathStyle,
 		})
+	case config.StorageGCS:
+		return storage.NewGCS(ctx, storage.GCSOptions{
+			Bucket: cfg.GCSBucket,
+			Prefix: cfg.GCSPrefix,
+		})
 	default:
 		return storage.NewLocal(cfg.LocalDir)
 	}

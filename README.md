@@ -23,19 +23,24 @@ All configuration is via environment variables.
 | Variable | Default | Notes |
 |---|---|---|
 | `PORT` | `3000` | listen port |
-| `STORAGE_BACKEND` | `local` | `local` or `s3` |
+| `STORAGE_BACKEND` | `local` | `local`, `s3`, or `gcs` |
 | `CACHE_DIR` | `/var/lib/nx-remote-cache` | local backend only |
 | `S3_BUCKET` / `S3_REGION` / `S3_PREFIX` | — | s3 backend |
 | `S3_ENDPOINT` | — | set for R2/MinIO/non-AWS S3-compatible stores |
 | `S3_USE_PATH_STYLE` | `false` | set `true` for MinIO |
+| `GCS_BUCKET` / `GCS_PREFIX` | — | gcs backend |
+| `GOOGLE_APPLICATION_CREDENTIALS` | — | path to a service-account key JSON; unset when running on GKE/GCE/Cloud Run with workload identity |
 | `CACHE_READ_TOKENS` | — | comma-separated bearer tokens, read-only |
 | `CACHE_WRITE_TOKENS` | — | comma-separated bearer tokens, read+write (required, at least one) |
 | `MAX_CACHE_ENTRY_BYTES` | `524288000` (500MB) | reject larger uploads |
 
 Use `local` for a single always-on instance with a persistent volume. Use
-`s3` when the server runs as multiple replicas or on ephemeral
-infrastructure (recommended for anything backing CI at scale) — an S3
-bucket (or R2/MinIO) is the shared durable store.
+`s3` or `gcs` when the server runs as multiple replicas or on ephemeral
+infrastructure (recommended for anything backing CI at scale) — a bucket is
+the shared durable store. `gcs` authenticates via Application Default
+Credentials: a service account key file (`GOOGLE_APPLICATION_CREDENTIALS`),
+GKE/GCE workload identity, or `gcloud auth application-default login`
+locally — grant that identity `roles/storage.objectAdmin` on the bucket.
 
 ## Running locally
 
